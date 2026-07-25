@@ -1,12 +1,13 @@
-import { BrowserRouter, Routes, Route, NavLink, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
 import Dashboard from "@/pages/Dashboard";
 import Tasks from "@/pages/Tasks";
 import Executions from "@/pages/Executions";
 import { LayoutDashboard, ListTodo, ScrollText, Sun, Moon } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
-import { SidebarProvider, Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
+import { SidebarProvider, Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 const nav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -15,7 +16,6 @@ const nav = [
 ];
 
 function SidebarNav() {
-  const location = useLocation();
   const { setOpenMobile, state } = useSidebar();
   const collapsed = state === "collapsed";
 
@@ -36,18 +36,43 @@ function SidebarNav() {
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {nav.map(({ to, label, icon: Icon }) => (
-                <SidebarMenuItem key={to}>
-                  <SidebarMenuButton
-                    isActive={to === "/" ? location.pathname === "/" : location.pathname.startsWith(to)}
-                    tooltip={label}
-                    render={<NavLink to={to} end={to === "/"} onClick={handleClick} />}
-                  >
-                    <Icon />
-                    <span>{label}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {nav.map(({ to, label, icon: Icon }) => {
+                  const link = (
+                    <NavLink
+                      to={to}
+                      end={to === "/"}
+                      onClick={handleClick}
+                      className={({ isActive }) =>
+                        cn(
+                          "flex w-full items-center gap-2 rounded-md p-2 text-sm transition-colors",
+                          "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                          "group-data-[collapsible=icon]/sidebar:justify-center group-data-[collapsible=icon]/sidebar:size-8 group-data-[collapsible=icon]/sidebar:p-2",
+                          "[&_svg]:size-4 [&_svg]:shrink-0",
+                          "group-data-[collapsible=icon]/sidebar:[&>span]:hidden [&>span:last-child]:truncate",
+                          isActive
+                            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                            : "text-sidebar-foreground/70"
+                        )
+                      }
+                    >
+                      <Icon />
+                      <span>{label}</span>
+                    </NavLink>
+                  );
+
+                  return (
+                    <SidebarMenuItem key={to}>
+                      {collapsed ? (
+                        <Tooltip>
+                          <TooltipTrigger render={link} />
+                          <TooltipContent side="right">{label}</TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        link
+                      )}
+                    </SidebarMenuItem>
+                  );
+                })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
