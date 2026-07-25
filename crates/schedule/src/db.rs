@@ -349,6 +349,10 @@ impl Db {
         let id = id.to_string();
         tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
             let conn = conn.lock().unwrap();
+            conn.execute(
+                "DELETE FROM task_executions WHERE task_id = ?1",
+                params![&id],
+            )?;
             let affected = conn.execute("DELETE FROM tasks WHERE id = ?1", params![&id])?;
             Ok(affected > 0)
         })
