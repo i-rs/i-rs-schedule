@@ -42,16 +42,17 @@ impl ScheduleConfig {
     pub fn remaining_delay(&self, created_at: &str) -> Option<Duration> {
         match self {
             ScheduleConfig::Once { delay_secs } => {
-                let created_utc = chrono::NaiveDateTime::parse_from_str(
-                    created_at,
-                    "%Y-%m-%dT%H:%M:%S%.3fZ",
-                )
-                .ok()
-                .or_else(|| {
-                    chrono::NaiveDateTime::parse_from_str(created_at, "%Y-%m-%dT%H:%M:%S%.fZ")
+                let created_utc =
+                    chrono::NaiveDateTime::parse_from_str(created_at, "%Y-%m-%dT%H:%M:%S%.3fZ")
                         .ok()
-                })
-                .map(|dt| dt.and_utc());
+                        .or_else(|| {
+                            chrono::NaiveDateTime::parse_from_str(
+                                created_at,
+                                "%Y-%m-%dT%H:%M:%S%.fZ",
+                            )
+                            .ok()
+                        })
+                        .map(|dt| dt.and_utc());
 
                 match created_utc {
                     Some(created) => {

@@ -19,11 +19,7 @@ where
 }
 
 fn error_response(status: u16, message: &str) -> Response {
-    Response::with_status(
-        status,
-        serde_json::json!({ "error": message }).to_string(),
-    )
-    .unwrap()
+    Response::with_status(status, serde_json::json!({ "error": message }).to_string()).unwrap()
 }
 
 #[derive(Deserialize)]

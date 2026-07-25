@@ -3,7 +3,11 @@ use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
 
 #[derive(Parser)]
-#[command(name = "i-rs-cli", version, about = "CLI for i-rs-schedule task management")]
+#[command(
+    name = "i-rs-cli",
+    version,
+    about = "CLI for i-rs-schedule task management"
+)]
 struct Cli {
     #[arg(long, default_value = "http://localhost:3000")]
     server: String,
@@ -130,7 +134,11 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Task(cmd) => match cmd {
             TaskCmd::Add(args) => {
-                let schedule_type = if args.delay_secs.is_some() { "once" } else { "cron" };
+                let schedule_type = if args.delay_secs.is_some() {
+                    "once"
+                } else {
+                    "cron"
+                };
                 let headers_json: Option<serde_json::Value> = args
                     .headers
                     .as_ref()
