@@ -24,7 +24,7 @@ function SidebarNav() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <div className="flex items-center gap-2 px-3 py-2">
+        <div className={cn("flex items-center gap-2 py-2", collapsed ? "justify-center px-0" : "px-3")}>
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-xs font-bold shrink-0">
             S
           </div>
