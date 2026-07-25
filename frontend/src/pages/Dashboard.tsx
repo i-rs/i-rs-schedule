@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, Skeleton } from "@/components/ui";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { listTasks, listExecutions, type Task, type TaskExecution } from "@/api";
 import { Clock, Play, CheckCircle2, AlertCircle } from "lucide-react";
 
@@ -60,7 +61,7 @@ export default function Dashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Successful Executions</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Success</CardTitle>
             <CheckCircle2 className="h-4 w-4 text-emerald-500" />
           </CardHeader>
           <CardContent>
@@ -70,7 +71,7 @@ export default function Dashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Failed Executions</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Failed</CardTitle>
             <AlertCircle className="h-4 w-4 text-destructive" />
           </CardHeader>
           <CardContent>

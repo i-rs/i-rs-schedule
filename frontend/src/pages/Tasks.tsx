@@ -1,5 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
-import { Button, Card, CardContent, Input, Label, Select, Badge, Dialog, Tabs, TabsList, TabsTrigger } from "@/components/ui";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, type Task } from "@/api";
 import { Plus, Trash2, Play, Square, Pencil, RefreshCw } from "lucide-react";
 
@@ -93,7 +100,7 @@ export default function Tasks() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Tasks</h1>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={load} disabled={loading}>
+          <Button size="icon" variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className="h-4 w-4" />
           </Button>
           <Button size="sm" onClick={openCreate}>
@@ -105,7 +112,7 @@ export default function Tasks() {
       {loading ? (
         <p className="text-muted-foreground">Loading…</p>
       ) : tasks.length === 0 ? (
-        <p className="text-muted-foreground">No tasks yet. Create one to get started.</p>
+        <p className="text-muted-foreground">No tasks yet.</p>
       ) : (
         <div className="space-y-3">
           {tasks.map((t) => {
@@ -124,19 +131,19 @@ export default function Tasks() {
                   </div>
                   <div className="flex items-center gap-1">
                     {t.enabled ? (
-                      <Button size="icon" variant="ghost" title="Disable" onClick={async () => { await disableTask(t.id); load(); }}>
+                      <Button size="icon-sm" variant="ghost" title="Disable" onClick={async () => { await disableTask(t.id); load(); }}>
                         <Square className="h-4 w-4" />
                       </Button>
                     ) : (
-                      <Button size="icon" variant="ghost" title="Enable" onClick={async () => { await enableTask(t.id); load(); }}>
+                      <Button size="icon-sm" variant="ghost" title="Enable" onClick={async () => { await enableTask(t.id); load(); }}>
                         <Play className="h-4 w-4" />
                       </Button>
                     )}
-                    <Button size="icon" variant="ghost" title="Edit" onClick={() => openEdit(t)}>
+                    <Button size="icon-sm" variant="ghost" title="Edit" onClick={() => openEdit(t)}>
                       <Pencil className="h-4 w-4" />
                     </Button>
                     <Button
-                      size="icon"
+                      size="icon-sm"
                       variant="ghost"
                       title="Delete"
                       onClick={async () => {
@@ -156,85 +163,93 @@ export default function Tasks() {
         </div>
       )}
 
-      <Dialog open={showDialog} onClose={() => setShowDialog(false)} title={editingId ? "Edit Task" : "Create Task"}>
-        <div className="space-y-4">
-          <div>
-            <Label>Name</Label>
-            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="My Task" />
-          </div>
+      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editingId ? "Edit Task" : "Create Task"}</DialogTitle>
+          </DialogHeader>
 
-          <Tabs
-            defaultValue={form.task_type}
-            className="space-y-3"
-          >
-            <TabsList>
-              <TabsTrigger value="http" active={form.task_type} setActive={(v) => setForm({ ...form, task_type: v as "http" | "shell" })}>HTTP</TabsTrigger>
-              <TabsTrigger value="shell" active={form.task_type} setActive={(v) => setForm({ ...form, task_type: v as "http" | "shell" })}>Shell</TabsTrigger>
-            </TabsList>
-          </Tabs>
-
-          <div>
-            <Label>Schedule</Label>
-            <div className="flex gap-3 mt-1">
-              <Select
-                value={form.schedule_type}
-                onChange={(e) => setForm({ ...form, schedule_type: e.target.value as "cron" | "once" })}
-                options={[
-                  { value: "cron", label: "Cron" },
-                  { value: "once", label: "Once (delay)" },
-                ]}
-              />
-              {form.schedule_type === "cron" ? (
-                <Input value={form.cron_expr} onChange={(e) => setForm({ ...form, cron_expr: e.target.value })} placeholder="*/5 * * * *" />
-              ) : (
-                <Input
-                  type="number"
-                  value={form.delay_secs}
-                  onChange={(e) => setForm({ ...form, delay_secs: e.target.value })}
-                  placeholder="Seconds"
-                />
-              )}
-            </div>
-          </div>
-
-          {form.task_type === "http" ? (
-            <>
-              <div className="flex gap-3">
-                <div className="w-24">
-                  <Label>Method</Label>
-                  <Select
-                    value={form.http_method}
-                    onChange={(e) => setForm({ ...form, http_method: e.target.value })}
-                    options={[
-                      { value: "GET", label: "GET" },
-                      { value: "POST", label: "POST" },
-                      { value: "PUT", label: "PUT" },
-                      { value: "DELETE", label: "DELETE" },
-                    ]}
-                  />
-                </div>
-                <div className="flex-1">
-                  <Label>URL</Label>
-                  <Input value={form.http_url} onChange={(e) => setForm({ ...form, http_url: e.target.value })} placeholder="https://example.com/api" />
-                </div>
-              </div>
-              <div>
-                <Label>Body (optional)</Label>
-                <Input value={form.http_body} onChange={(e) => setForm({ ...form, http_body: e.target.value })} placeholder='{"key": "value"}' />
-              </div>
-            </>
-          ) : (
+          <div className="space-y-4 py-2">
             <div>
-              <Label>Command</Label>
-              <Input value={form.shell_cmd} onChange={(e) => setForm({ ...form, shell_cmd: e.target.value })} placeholder="echo hello" />
+              <Label>Name</Label>
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="My Task" />
             </div>
-          )}
 
-          <div className="flex justify-end gap-2 pt-2">
+            <div>
+              <Label>Type</Label>
+              <Tabs value={form.task_type} onValueChange={(v) => setForm({ ...form, task_type: v as "http" | "shell" })} className="mt-1">
+                <TabsList>
+                  <TabsTrigger value="http">HTTP</TabsTrigger>
+                  <TabsTrigger value="shell">Shell</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+
+            <div>
+              <Label>Schedule</Label>
+              <div className="flex gap-3 mt-1">
+                <Select value={form.schedule_type} onValueChange={(v) => setForm({ ...form, schedule_type: v as "cron" | "once" })}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cron">Cron</SelectItem>
+                    <SelectItem value="once">Once (delay)</SelectItem>
+                  </SelectContent>
+                </Select>
+                {form.schedule_type === "cron" ? (
+                  <Input value={form.cron_expr} onChange={(e) => setForm({ ...form, cron_expr: e.target.value })} placeholder="*/5 * * * *" />
+                ) : (
+                  <Input
+                    type="number"
+                    value={form.delay_secs}
+                    onChange={(e) => setForm({ ...form, delay_secs: e.target.value })}
+                    placeholder="Seconds"
+                  />
+                )}
+              </div>
+            </div>
+
+            {form.task_type === "http" ? (
+              <>
+                <div className="flex gap-3">
+                  <div className="w-24">
+                    <Label>Method</Label>
+                    <Select value={form.http_method} onValueChange={(v) => setForm({ ...form, http_method: v || "GET" })}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="GET">GET</SelectItem>
+                        <SelectItem value="POST">POST</SelectItem>
+                        <SelectItem value="PUT">PUT</SelectItem>
+                        <SelectItem value="DELETE">DELETE</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex-1">
+                    <Label>URL</Label>
+                    <Input value={form.http_url} onChange={(e) => setForm({ ...form, http_url: e.target.value })} placeholder="https://example.com/api" />
+                  </div>
+                </div>
+                <div>
+                  <Label>Body (optional)</Label>
+                  <Input value={form.http_body} onChange={(e) => setForm({ ...form, http_body: e.target.value })} placeholder='{"key": "value"}' />
+                </div>
+              </>
+            ) : (
+              <div>
+                <Label>Command</Label>
+                <Input value={form.shell_cmd} onChange={(e) => setForm({ ...form, shell_cmd: e.target.value })} placeholder="echo hello" />
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
             <Button variant="outline" onClick={() => setShowDialog(false)}>Cancel</Button>
             <Button onClick={handleSubmit} disabled={!form.name}>{editingId ? "Update" : "Create"}</Button>
-          </div>
-        </div>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
     </div>
   );
