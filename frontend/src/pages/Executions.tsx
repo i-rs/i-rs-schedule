@@ -29,11 +29,11 @@ export default function Executions() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold">Execution Logs</h1>
         <div className="flex gap-2">
           <Select value={filterTaskId} onValueChange={(v) => setFilterTaskId(v || "all")}>
-            <SelectTrigger className="w-48">
+            <SelectTrigger className="w-full sm:w-48">
               <SelectValue placeholder="All Tasks" />
             </SelectTrigger>
             <SelectContent>
@@ -62,9 +62,9 @@ export default function Executions() {
             return (
               <Card key={e.id}>
                 <CardContent className="py-4">
-                  <div className="flex items-start justify-between">
-                    <div className="space-y-1 flex-1">
-                      <div className="flex items-center gap-2">
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                    <div className="space-y-1 flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
                         <Badge variant={e.status === "success" ? "default" : e.status === "running" ? "outline" : "destructive"}>{e.status}</Badge>
                         {task && <span className="text-sm font-medium">{task.name}</span>}
                         {e.http_status && <span className="text-xs text-muted-foreground">HTTP {e.http_status}</span>}
@@ -73,7 +73,7 @@ export default function Executions() {
                         <pre className="text-xs text-muted-foreground bg-muted rounded p-2 max-h-32 overflow-auto mt-1">{e.output}</pre>
                       )}
                     </div>
-                    <div className="text-xs text-muted-foreground whitespace-nowrap ml-4">
+                    <div className="text-xs text-muted-foreground whitespace-nowrap">
                       <div>{new Date(e.started_at).toLocaleString()}</div>
                       {e.finished_at && <div>→ {new Date(e.finished_at).toLocaleString()}</div>}
                     </div>

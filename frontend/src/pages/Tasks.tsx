@@ -97,7 +97,7 @@ export default function Tasks() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold">Tasks</h1>
         <div className="flex gap-2">
           <Button size="icon" variant="outline" onClick={load} disabled={loading}>
@@ -119,7 +119,7 @@ export default function Tasks() {
             const url = t.task_type.type === "http" ? t.task_type.url : t.task_type.cmd;
             return (
               <Card key={t.id}>
-                <CardContent className="flex items-center justify-between py-4">
+                <CardContent className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-4 gap-3">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{t.name}</span>
@@ -202,7 +202,7 @@ export default function Tasks() {
                     <Input value={form.cron_expr} onChange={(e) => setForm({ ...form, cron_expr: e.target.value })} placeholder="*/5 * * * *" />
                     <details className="text-xs text-muted-foreground">
                       <summary className="cursor-pointer hover:text-foreground">Cron reference</summary>
-                      <div className="mt-2 rounded-md border bg-muted/50 p-3 space-y-2">
+                      <div className="mt-2 rounded-md border bg-muted/50 p-3 space-y-2 overflow-x-auto">
                         <p className="text-muted-foreground mb-2">Format: <code className="bg-muted px-1 rounded">min hour day month weekday</code></p>
                         <table className="w-full">
                           <thead>
