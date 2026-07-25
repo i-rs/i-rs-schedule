@@ -16,14 +16,20 @@ const nav = [
 
 function SidebarNav() {
   const location = useLocation();
-  const { setOpenMobile } = useSidebar();
+  const { setOpenMobile, state } = useSidebar();
+  const collapsed = state === "collapsed";
 
   const handleClick = () => setOpenMobile(false);
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <div className="px-3 py-2 font-bold text-lg">i-rs-schedule</div>
+        <div className="flex items-center gap-2 px-3 py-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-xs font-bold shrink-0">
+            S
+          </div>
+          {!collapsed && <span className="font-bold text-lg truncate">i-rs-schedule</span>}
+        </div>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
