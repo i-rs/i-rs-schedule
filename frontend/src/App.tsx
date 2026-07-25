@@ -21,7 +21,7 @@ function SidebarNav() {
   const handleClick = () => setOpenMobile(false);
 
   return (
-    <Sidebar>
+    <Sidebar collapsible="icon">
       <SidebarHeader>
         <div className="px-3 py-2 font-bold text-lg">i-rs-schedule</div>
       </SidebarHeader>
@@ -34,6 +34,7 @@ function SidebarNav() {
                 <SidebarMenuItem key={to}>
                   <SidebarMenuButton
                     isActive={to === "/" ? location.pathname === "/" : location.pathname.startsWith(to)}
+                    tooltip={label}
                     render={<NavLink to={to} end={to === "/"} onClick={handleClick} />}
                   >
                     <Icon />
