@@ -740,8 +740,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "i-rs-cli"
-version = "0.1.0"
+name = "i-rs-schedule"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "cron",
+ "desirable",
+ "futures-util",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "i-rs-schedule-cli"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1568,26 +1588,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939"
 dependencies = [
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "schedule"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "cron",
- "desirable",
- "futures-util",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]

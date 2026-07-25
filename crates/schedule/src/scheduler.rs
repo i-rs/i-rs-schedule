@@ -119,8 +119,15 @@ impl Scheduler {
                 Some(expired) = self.queue.next() => {
                     let task = expired.into_inner();
 
-                    if matches!(task.schedule, ScheduleConfig::Once { .. }) {
-                        self.keys.remove(&task.id);
+                    match &task.schedule {
+                        ScheduleConfig::Once { .. } => {
+                            self.keys.remove(&task.id);
+                        }
+                        ScheduleConfig::Cron { .. } => {
+                            let next = task.schedule.next_delay();
+                            let key = self.queue.insert(task.clone(), next);
+                            self.keys.insert(task.id.clone(), key);
+                        }
                     }
 
                     let exec = executor.clone();
