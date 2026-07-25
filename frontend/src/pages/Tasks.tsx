@@ -8,8 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, type Task } from "@/api";
-import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox } from "lucide-react";
+import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, runTask, type Task } from "@/api";
+import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap } from "lucide-react";
 
 interface TaskForm {
   name: string;
@@ -173,6 +173,9 @@ export default function Tasks() {
                         <Play className="h-4 w-4" />
                       </Button>
                     )}
+                    <Button size="icon-sm" variant="ghost" title="Run Now" onClick={async () => { await runTask(t.id); load(); }}>
+                      <Zap className="h-4 w-4" />
+                    </Button>
                     <Button size="icon-sm" variant="ghost" title="Edit" onClick={() => openEdit(t)}>
                       <Pencil className="h-4 w-4" />
                     </Button>

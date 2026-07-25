@@ -87,6 +87,10 @@ export async function deleteTask(id: string): Promise<void> {
   await request(`/api/tasks/${id}`, { method: "DELETE" });
 }
 
+export async function runTask(id: string): Promise<TaskExecution> {
+  return request<TaskExecution>(`/api/tasks/${id}/run`, { method: "POST" });
+}
+
 export async function enableTask(id: string): Promise<void> {
   await request(`/api/tasks/${id}/enable`, { method: "POST" });
 }

@@ -28,12 +28,13 @@ async fn main() -> anyhow::Result<()> {
 
     let executor = Arc::new(Executor);
     let scheduler_db = db.clone();
+    let api_executor = executor.clone();
 
     tokio::spawn(async move {
         scheduler.run(cmd_rx, executor, scheduler_db).await;
     });
 
-    let router = api::build_router(db, cmd_tx);
+    let router = api::build_router(db, cmd_tx, api_executor);
 
     tracing::info!("starting server on http://{addr}");
     desirable::new(&addr).run(router).await?;

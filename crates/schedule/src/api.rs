@@ -1,4 +1,5 @@
-use crate::db::{Db, ScheduleConfig, Task, TaskType};
+use crate::db::{Db, ScheduleConfig, Task, TaskExecution, TaskType};
+use crate::executor::Executor;
 use crate::scheduler::ControlCmd;
 use desirable::{Request, Response, Router};
 use serde::{Deserialize, Serialize};
@@ -115,7 +116,7 @@ fn build_update_task(id: String, body: CreateTaskRequest) -> Task {
     }
 }
 
-pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>) -> Router {
+pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor: Arc<Executor>) -> Router {
     let db = Arc::new(db);
     let cmd_tx = Arc::new(cmd_tx);
 
@@ -260,6 +261,50 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>) -> Router
                 }
                 false => Err(err_msg(404, "not found")),
             }
+        }
+    });
+
+    let db_run = db.clone();
+    router.post("/api/tasks/:id/run", move |req: Request| {
+        let db = db_run.clone();
+        let exec = executor.clone();
+        async move {
+            let id: String = req
+                .param("id")
+                .map_err(|_| err_msg(400, "missing id"))?;
+            let task = db
+                .get_task(&id)
+                .await
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?
+                .ok_or_else(|| err_msg(404, "not found"))?;
+
+            let exec_id = uuid::Uuid::new_v4().to_string();
+            let started_at = chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string();
+            let _ = db
+                .create_execution(&TaskExecution {
+                    id: exec_id.clone(),
+                    task_id: task.id.clone(),
+                    status: "running".to_string(),
+                    output: None,
+                    http_status: None,
+                    started_at: started_at.clone(),
+                    finished_at: None,
+                })
+                .await;
+
+            let result = exec.execute(&task).await;
+            let _ = db
+                .update_execution(&exec_id, &result.status, &result.output, result.http_status)
+                .await;
+
+            let exec_record = db
+                .get_execution(&exec_id)
+                .await
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?
+                .unwrap();
+            ok(exec_record)
         }
     });
 
