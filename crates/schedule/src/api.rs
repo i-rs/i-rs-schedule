@@ -1,25 +1,37 @@
 use crate::db::{Db, ScheduleConfig, Task, TaskType};
 use crate::scheduler::ControlCmd;
 use desirable::{Request, Response, Router};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-type ApiResult = std::result::Result<Response, Response>;
-
-fn ok_response(r: Response) -> ApiResult {
-    Ok(r)
+#[derive(Serialize)]
+struct ApiResponse {
+    code: u16,
+    message: String,
+    data: serde_json::Value,
 }
 
-fn json_response<T>(data: T) -> Response
-where
-    T: serde::Serialize + Send + Sync + 'static,
-{
-    Response::json(data).unwrap()
+fn ok<T: Serialize>(data: T) -> Result<Response, Response> {
+    let body = ApiResponse {
+        code: 0,
+        message: "ok".into(),
+        data: serde_json::to_value(&data).unwrap_or(serde_json::Value::Null),
+    };
+    Ok(Response::json(body).unwrap())
 }
 
-fn error_response(status: u16, message: &str) -> Response {
-    Response::with_status(status, serde_json::json!({ "error": message }).to_string()).unwrap()
+fn err(status: u16, msg: String) -> Response {
+    let body = ApiResponse {
+        code: status,
+        message: msg,
+        data: serde_json::Value::Null,
+    };
+    Response::with_status(status, serde_json::to_string(&body).unwrap()).unwrap()
+}
+
+fn err_msg(status: u16, msg: impl Into<String>) -> Response {
+    err(status, msg.into())
 }
 
 #[derive(Deserialize)]
@@ -118,13 +130,13 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>) -> Router
             let body: CreateTaskRequest = req
                 .body()
                 .await
-                .map_err(|e| error_response(400, &format!("invalid body: {e}")))?;
+                .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
             let task = build_task(body);
             db.create_task(&task)
                 .await
-                .map_err(|e| error_response(500, &format!("db error: {e}")))?;
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?;
             let _ = tx.send(ControlCmd::Add(task.clone()));
-            ok_response(json_response(task))
+            ok(task)
         }
     });
 
@@ -135,8 +147,8 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>) -> Router
             let tasks = db
                 .list_all_tasks()
                 .await
-                .map_err(|e| error_response(500, &format!("db error: {e}")))?;
-            ok_response(json_response(tasks))
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+            ok(tasks)
         }
     });
 
@@ -146,14 +158,14 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>) -> Router
         async move {
             let id: String = req
                 .param("id")
-                .map_err(|_| error_response(400, "missing id"))?;
+                .map_err(|_| err_msg(400, "missing id"))?;
             match db
                 .get_task(&id)
                 .await
-                .map_err(|e| error_response(500, &format!("db error: {e}")))?
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?
             {
-                Some(task) => ok_response(json_response(task)),
-                None => Err(error_response(404, "not found")),
+                Some(task) => ok(task),
+                None => Err(err_msg(404, "not found")),
             }
         }
     });
@@ -166,17 +178,17 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>) -> Router
         async move {
             let id: String = req
                 .param("id")
-                .map_err(|_| error_response(400, "missing id"))?;
+                .map_err(|_| err_msg(400, "missing id"))?;
             let body: CreateTaskRequest = req
                 .body()
                 .await
-                .map_err(|e| error_response(400, &format!("invalid body: {e}")))?;
+                .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
             let task = build_update_task(id, body);
             db.update_task(&task)
                 .await
-                .map_err(|e| error_response(500, &format!("db error: {e}")))?;
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?;
             let _ = tx.send(ControlCmd::Update(task.clone()));
-            ok_response(json_response(task))
+            ok(task)
         }
     });
 
@@ -188,18 +200,17 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>) -> Router
         async move {
             let id: String = req
                 .param("id")
-                .map_err(|_| error_response(400, "missing id"))?;
+                .map_err(|_| err_msg(400, "missing id"))?;
             match db
                 .delete_task(&id)
                 .await
-                .map_err(|e| error_response(500, &format!("db error: {e}")))?
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?
             {
                 true => {
                     let _ = tx.send(ControlCmd::Remove(id));
-                    let resp = serde_json::json!({ "deleted": true });
-                    ok_response(json_response(resp))
+                    ok(serde_json::json!({ "deleted": true }))
                 }
-                false => Err(error_response(404, "not found")),
+                false => Err(err_msg(404, "not found")),
             }
         }
     });
@@ -212,20 +223,19 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>) -> Router
         async move {
             let id: String = req
                 .param("id")
-                .map_err(|_| error_response(400, "missing id"))?;
+                .map_err(|_| err_msg(400, "missing id"))?;
             match db
                 .set_enabled(&id, true)
                 .await
-                .map_err(|e| error_response(500, &format!("db error: {e}")))?
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?
             {
                 true => {
                     if let Ok(Some(task)) = db.get_task(&id).await {
                         let _ = tx.send(ControlCmd::Add(task));
                     }
-                    let resp = serde_json::json!({ "enabled": true });
-                    ok_response(json_response(resp))
+                    ok(serde_json::json!({ "enabled": true }))
                 }
-                false => Err(error_response(404, "not found")),
+                false => Err(err_msg(404, "not found")),
             }
         }
     });
@@ -238,18 +248,17 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>) -> Router
         async move {
             let id: String = req
                 .param("id")
-                .map_err(|_| error_response(400, "missing id"))?;
+                .map_err(|_| err_msg(400, "missing id"))?;
             match db
                 .set_enabled(&id, false)
                 .await
-                .map_err(|e| error_response(500, &format!("db error: {e}")))?
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?
             {
                 true => {
                     let _ = tx.send(ControlCmd::Remove(id));
-                    let resp = serde_json::json!({ "enabled": false });
-                    ok_response(json_response(resp))
+                    ok(serde_json::json!({ "enabled": false }))
                 }
-                false => Err(error_response(404, "not found")),
+                false => Err(err_msg(404, "not found")),
             }
         }
     });
@@ -260,14 +269,14 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>) -> Router
         async move {
             let query_parts: Option<ExecQuery> = req
                 .query()
-                .map_err(|e| error_response(400, &format!("invalid query: {e}")))?;
+                .map_err(|e| err_msg(400, format!("invalid query: {e}")))?;
             let task_id = query_parts.as_ref().and_then(|q| q.task_id.as_deref());
             let limit = query_parts.as_ref().and_then(|q| q.limit);
             let execs = db
                 .list_executions(task_id, limit)
                 .await
-                .map_err(|e| error_response(500, &format!("db error: {e}")))?;
-            ok_response(json_response(execs))
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+            ok(execs)
         }
     });
 
@@ -277,14 +286,14 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>) -> Router
         async move {
             let id: String = req
                 .param("id")
-                .map_err(|_| error_response(400, "missing id"))?;
+                .map_err(|_| err_msg(400, "missing id"))?;
             match db
                 .get_execution(&id)
                 .await
-                .map_err(|e| error_response(500, &format!("db error: {e}")))?
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?
             {
-                Some(exec) => ok_response(json_response(exec)),
-                None => Err(error_response(404, "not found")),
+                Some(exec) => ok(exec),
+                None => Err(err_msg(404, "not found")),
             }
         }
     });

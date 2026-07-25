@@ -7,9 +7,9 @@ edition = "2024"
 desirable = "1.1"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["time"] }
-rusqlite = { version = "0.35", features = ["bundled"] }
-reqwest = { version = "0.12", features = ["json"] }
-cron = "0.15"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+reqwest = { version = "0.13.4", features = ["json"] }
+cron = "0.17.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
