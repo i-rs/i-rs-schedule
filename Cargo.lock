@@ -344,9 +344,9 @@ checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 
 [[package]]
 name = "desirable"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6065d8f132a548ffd3d336a157028c33f60b9c0a518b29cc4b3494d2073aef3"
+checksum = "bb488ff8ba7655477370594081110587149cb9a204ed0f1a6f08a755310d15e4"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -18,7 +18,7 @@ fn ok<T: Serialize>(data: T) -> Result<Response, Response> {
         message: "ok".into(),
         data: serde_json::to_value(&data).unwrap_or(serde_json::Value::Null),
     };
-    Ok(Response::json(body).unwrap())
+    Ok(Response::json(body))
 }
 
 fn err(status: u16, msg: String) -> Response {
