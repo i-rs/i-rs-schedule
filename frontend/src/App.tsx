@@ -4,7 +4,7 @@ import Tasks from "@/pages/Tasks";
 import Executions from "@/pages/Executions";
 import { LayoutDashboard, ListTodo, ScrollText, Sun, Moon } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
-import { SidebarProvider, Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarProvider, Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -16,6 +16,9 @@ const nav = [
 
 function SidebarNav() {
   const location = useLocation();
+  const { setOpenMobile } = useSidebar();
+
+  const handleClick = () => setOpenMobile(false);
 
   return (
     <Sidebar>
@@ -31,7 +34,7 @@ function SidebarNav() {
                 <SidebarMenuItem key={to}>
                   <SidebarMenuButton
                     isActive={to === "/" ? location.pathname === "/" : location.pathname.startsWith(to)}
-                    render={<NavLink to={to} end={to === "/"} />}
+                    render={<NavLink to={to} end={to === "/"} onClick={handleClick} />}
                   >
                     <Icon />
                     <span>{label}</span>

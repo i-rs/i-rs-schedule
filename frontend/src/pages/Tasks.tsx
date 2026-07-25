@@ -7,8 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Skeleton } from "@/components/ui/skeleton";
 import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, type Task } from "@/api";
-import { Plus, Trash2, Play, Square, Pencil, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox } from "lucide-react";
 
 interface TaskForm {
   name: string;
@@ -110,24 +111,57 @@ export default function Tasks() {
       </div>
 
       {loading ? (
-        <p className="text-muted-foreground">Loading…</p>
+        <div className="space-y-3">
+          {[1, 2, 3].map((i) => (
+            <Card key={i}>
+              <CardContent className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-4 gap-3">
+                <div className="space-y-2 flex-1">
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="h-5 w-24 rounded-md" />
+                    <Skeleton className="h-5 w-16 rounded-md" />
+                    <Skeleton className="h-5 w-12 rounded-md" />
+                  </div>
+                  <Skeleton className="h-4 w-64" />
+                </div>
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4].map((j) => (
+                    <Skeleton key={j} className="h-7 w-7 rounded-md" />
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       ) : tasks.length === 0 ? (
-        <p className="text-muted-foreground">No tasks yet.</p>
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+          <Inbox className="h-12 w-12 mb-3 opacity-40" />
+          <p className="text-sm">No tasks yet. Create one to start scheduling.</p>
+          <Button size="sm" onClick={openCreate} className="mt-3">
+            <Plus className="h-4 w-4" /> Create Task
+          </Button>
+        </div>
       ) : (
         <div className="space-y-3">
           {tasks.map((t) => {
             const url = t.task_type.type === "http" ? t.task_type.url : t.task_type.cmd;
+            const TypeIcon = t.task_type.type === "http" ? Globe : Terminal;
             return (
-              <Card key={t.id}>
+              <Card key={t.id} className={`border-l-4 ${t.enabled ? "border-l-emerald-500" : "border-l-muted"} hover:shadow-sm transition-shadow`}>
                 <CardContent className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-4 gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{t.name}</span>
-                      <Badge variant={t.enabled ? "default" : "secondary"}>{t.enabled ? "Enabled" : "Disabled"}</Badge>
-                      <Badge variant="outline">{t.task_type.type.toUpperCase()}</Badge>
-                      <Badge variant="outline">{t.schedule.type === "cron" ? t.schedule.expr : `${t.schedule.delay_secs}s`}</Badge>
+                  <div className="space-y-1.5 flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <TypeIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="font-medium text-sm">{t.name}</span>
+                      <Badge variant={t.enabled ? "default" : "secondary"} className="text-[10px]">
+                        {t.enabled ? "Enabled" : "Disabled"}
+                      </Badge>
+                      <Badge variant="outline" className="text-[10px]">{t.task_type.type.toUpperCase()}</Badge>
+                      <Badge variant="outline" className="text-[10px]">
+                        <Clock className="mr-1 h-3 w-3" />
+                        {t.schedule.type === "cron" ? t.schedule.expr : `${t.schedule.delay_secs}s`}
+                      </Badge>
                     </div>
-                    <p className="text-sm text-muted-foreground truncate max-w-xl">{url}</p>
+                    <p className="text-xs text-muted-foreground truncate max-w-xl">{url}</p>
                   </div>
                   <div className="flex items-center gap-1">
                     {t.enabled ? (
