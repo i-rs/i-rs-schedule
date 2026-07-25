@@ -4,7 +4,8 @@ import Tasks from "@/pages/Tasks";
 import Executions from "@/pages/Executions";
 import { LayoutDashboard, ListTodo, ScrollText, Sun, Moon } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
-import { SidebarProvider, Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarProvider, Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger } from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 const nav = [
@@ -41,28 +42,13 @@ function SidebarNav() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter>
-        <ThemeToggle />
-      </SidebarFooter>
     </Sidebar>
   );
 }
 
-function ThemeToggle() {
-  const { theme, toggle } = useTheme();
-  return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <SidebarMenuButton onClick={toggle}>
-          {theme === "dark" ? <Sun /> : <Moon />}
-          <span>{theme === "dark" ? "Light" : "Dark"} mode</span>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
-    </SidebarMenu>
-  );
-}
-
 function App() {
+  const { theme, toggle } = useTheme();
+
   return (
     <TooltipProvider>
       <BrowserRouter>
@@ -74,6 +60,10 @@ function App() {
               <header className="sticky top-0 z-40 flex items-center gap-3 border-b bg-background px-4 py-3">
                 <SidebarTrigger />
                 <span className="font-bold text-lg md:hidden">i-rs-schedule</span>
+                <div className="flex-1" />
+                <Button size="icon-sm" variant="ghost" onClick={toggle}>
+                  {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                </Button>
               </header>
               <div className="flex-1 p-4 md:p-6 overflow-auto">
                 <Routes>
