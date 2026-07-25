@@ -27,7 +27,7 @@ const emptyForm: TaskForm = {
   name: "",
   task_type: "http",
   schedule_type: "cron",
-  cron_expr: "*/5 * * * *",
+  cron_expr: "0 */5 * * * *",
   delay_secs: "60",
   http_method: "GET",
   http_url: "",
@@ -233,11 +233,12 @@ export default function Tasks() {
                 </Select>
                 {form.schedule_type === "cron" ? (
                   <div className="space-y-2 flex-1">
-                    <Input value={form.cron_expr} onChange={(e) => setForm({ ...form, cron_expr: e.target.value })} placeholder="*/5 * * * *" />
+                    <Input value={form.cron_expr} onChange={(e) => setForm({ ...form, cron_expr: e.target.value })} placeholder="0 */5 * * * *" />
                     <details className="text-xs text-muted-foreground">
                       <summary className="cursor-pointer hover:text-foreground">Cron reference</summary>
                       <div className="mt-2 rounded-md border bg-muted/50 p-3 space-y-2 overflow-x-auto">
-                        <p className="text-muted-foreground mb-2">Format: <code className="bg-muted px-1 rounded">min hour day month weekday</code></p>
+                        <p className="text-muted-foreground mb-2">Format: <code className="bg-muted px-1 rounded">sec min hour dom month dow</code></p>
+                        <p className="text-muted-foreground text-[11px]">6 fields required. <code>sec</code> is usually <code>0</code>.</p>
                         <table className="w-full">
                           <thead>
                             <tr className="border-b">
@@ -246,14 +247,15 @@ export default function Tasks() {
                             </tr>
                           </thead>
                           <tbody className="[&_tr]:border-b [&_tr:last-child]:border-0">
-                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">*/5 * * * *</code></td><td className="py-1">Every 5 minutes</td></tr>
-                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">*/15 * * * *</code></td><td className="py-1">Every 15 minutes</td></tr>
-                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">0 * * * *</code></td><td className="py-1">Every hour at :00</td></tr>
-                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">0 0 * * *</code></td><td className="py-1">Daily at midnight</td></tr>
-                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">0 9 * * 1-5</code></td><td className="py-1">9:00 AM, Mon–Fri</td></tr>
-                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">0 0 1 * *</code></td><td className="py-1">Midnight on 1st of every month</td></tr>
-                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">30 2 * * 0</code></td><td className="py-1">2:30 AM every Sunday</td></tr>
-                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">0 0,12 * * *</code></td><td className="py-1">Midnight and noon daily</td></tr>
+                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">0 */5 * * * *</code></td><td className="py-1">Every 5 minutes</td></tr>
+                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">0 */15 * * * *</code></td><td className="py-1">Every 15 minutes</td></tr>
+                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">0 * * * * *</code></td><td className="py-1">Every minute</td></tr>
+                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">0 0 * * * *</code></td><td className="py-1">Every hour at :00</td></tr>
+                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">0 0 0 * * *</code></td><td className="py-1">Daily at midnight</td></tr>
+                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">0 0 9 * * 1-5</code></td><td className="py-1">9:00 AM, Mon–Fri</td></tr>
+                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">0 0 0 1 * *</code></td><td className="py-1">Midnight on 1st of every month</td></tr>
+                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">0 30 2 * * 0</code></td><td className="py-1">2:30 AM every Sunday</td></tr>
+                            <tr><td className="py-1 pr-4"><code className="bg-muted px-1 rounded">0 0 0,12 * * *</code></td><td className="py-1">Midnight and noon daily</td></tr>
                           </tbody>
                         </table>
                       </div>
