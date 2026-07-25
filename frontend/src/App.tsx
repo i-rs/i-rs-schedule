@@ -44,11 +44,12 @@ function SidebarNav() {
                       onClick={handleClick}
                       className={({ isActive }) =>
                         cn(
-                          "flex w-full items-center gap-2 rounded-md p-2 text-sm transition-colors",
+                          "flex rounded-md text-sm transition-colors",
                           "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                          "group-data-[collapsible=icon]/sidebar:justify-center group-data-[collapsible=icon]/sidebar:size-8 group-data-[collapsible=icon]/sidebar:p-2",
                           "[&_svg]:size-4 [&_svg]:shrink-0",
-                          "group-data-[collapsible=icon]/sidebar:[&>span]:hidden [&>span:last-child]:truncate",
+                          collapsed
+                            ? "size-8 items-center justify-center p-0"
+                            : "w-full items-center gap-2 p-2",
                           isActive
                             ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
                             : "text-sidebar-foreground/70"
@@ -56,7 +57,7 @@ function SidebarNav() {
                       }
                     >
                       <Icon />
-                      <span>{label}</span>
+                      {!collapsed && <span className="truncate">{label}</span>}
                     </NavLink>
                   );
 
