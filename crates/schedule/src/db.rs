@@ -69,6 +69,71 @@ pub struct Db {
     conn: Arc<Mutex<Connection>>,
 }
 
+mod private {
+    use super::*;
+
+    pub fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
+        let id: String = row.get("id")?;
+        let name: String = row.get("name")?;
+        let task_type_str: String = row.get("task_type")?;
+        let enabled: bool = row.get::<_, i64>("enabled")? != 0;
+        let schedule_type: String = row.get("schedule_type")?;
+        let cron_expr: Option<String> = row.get("cron_expr")?;
+        let delay_secs: Option<i64> = row.get("delay_secs")?;
+        let http_method: Option<String> = row.get("http_method")?;
+        let http_url: Option<String> = row.get("http_url")?;
+        let http_headers: Option<String> = row.get("http_headers")?;
+        let http_body: Option<String> = row.get("http_body")?;
+        let shell_cmd: Option<String> = row.get("shell_cmd")?;
+        let created_at: String = row.get("created_at")?;
+        let updated_at: String = row.get("updated_at")?;
+
+        let task_type = match task_type_str.as_str() {
+            "shell" => TaskType::Shell {
+                cmd: shell_cmd.unwrap_or_default(),
+            },
+            _ => TaskType::Http {
+                method: http_method.unwrap_or_else(|| "GET".into()),
+                url: http_url.unwrap_or_default(),
+                headers: http_headers
+                    .and_then(|h| serde_json::from_str(&h).ok()),
+                body: http_body,
+            },
+        };
+
+        let schedule = match schedule_type.as_str() {
+            "once" => ScheduleConfig::Once {
+                delay_secs: delay_secs.unwrap_or(0) as u64,
+            },
+            _ => ScheduleConfig::Cron {
+                expr: cron_expr.unwrap_or_default(),
+            },
+        };
+
+        Ok(Task {
+            id,
+            name,
+            task_type,
+            enabled,
+            schedule,
+            created_at,
+            updated_at,
+        })
+    }
+
+    pub fn row_to_execution(row: &rusqlite::Row) -> rusqlite::Result<TaskExecution> {
+        Ok(TaskExecution {
+            id: row.get("id")?,
+            task_id: row.get("task_id")?,
+            status: row.get("status")?,
+            output: row.get("output")?,
+            http_status: row.get("http_status")?,
+            started_at: row.get("started_at")?,
+            finished_at: row.get("finished_at")?,
+        })
+    }
+}
+
 impl Db {
     pub fn new(db_path: &str) -> anyhow::Result<Self> {
         if let Some(parent) = Path::new(db_path).parent() {
@@ -119,68 +184,6 @@ impl Db {
         )
         .context("init sqlite schema")?;
         Ok(())
-    }
-
-    fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
-        let id: String = row.get("id")?;
-        let name: String = row.get("name")?;
-        let task_type_str: String = row.get("task_type")?;
-        let enabled: bool = row.get::<_, i64>("enabled")? != 0;
-        let schedule_type: String = row.get("schedule_type")?;
-        let cron_expr: Option<String> = row.get("cron_expr")?;
-        let delay_secs: Option<i64> = row.get("delay_secs")?;
-        let http_method: Option<String> = row.get("http_method")?;
-        let http_url: Option<String> = row.get("http_url")?;
-        let http_headers: Option<String> = row.get("http_headers")?;
-        let http_body: Option<String> = row.get("http_body")?;
-        let shell_cmd: Option<String> = row.get("shell_cmd")?;
-        let created_at: String = row.get("created_at")?;
-        let updated_at: String = row.get("updated_at")?;
-
-        let task_type = match task_type_str.as_str() {
-            "shell" => TaskType::Shell {
-                cmd: shell_cmd.unwrap_or_default(),
-            },
-            _ => TaskType::Http {
-                method: http_method.unwrap_or_else(|| "GET".into()),
-                url: http_url.unwrap_or_default(),
-                headers: http_headers
-                    .and_then(|h| serde_json::from_str(&h).ok())
-                    .unwrap_or(serde_json::Value::Null),
-                body: http_body,
-            },
-        };
-
-        let schedule = match schedule_type.as_str() {
-            "once" => ScheduleConfig::Once {
-                delay_secs: delay_secs.unwrap_or(0) as u64,
-            },
-            _ => ScheduleConfig::Cron {
-                expr: cron_expr.unwrap_or_default(),
-            },
-        };
-
-        Ok(Task {
-            id,
-            name,
-            task_type,
-            enabled,
-            schedule,
-            created_at,
-            updated_at,
-        })
-    }
-
-    fn row_to_execution(row: &rusqlite::Row) -> rusqlite::Result<TaskExecution> {
-        Ok(TaskExecution {
-            id: row.get("id")?,
-            task_id: row.get("task_id")?,
-            status: row.get("status")?,
-            output: row.get("output")?,
-            http_status: row.get("http_status")?,
-            started_at: row.get("started_at")?,
-            finished_at: row.get("finished_at")?,
-        })
     }
 
     pub async fn create_task(&self, task: &Task) -> anyhow::Result<()> {
@@ -246,43 +249,45 @@ impl Db {
     pub async fn list_enabled_tasks(&self) -> anyhow::Result<Vec<Task>> {
         let conn = self.conn.clone();
         tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<Task>> {
-            let conn = conn.lock().unwrap();
-            let mut stmt = conn.prepare("SELECT * FROM tasks WHERE enabled = 1")?;
-            let tasks = stmt
-                .query_map([], |row| Self::row_to_task(row))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(tasks)
-        })
-        .await??
+                let conn = conn.lock().unwrap();
+                let mut stmt = conn.prepare("SELECT * FROM tasks WHERE enabled = 1")?;
+                let tasks = stmt
+                    .query_map([], private::row_to_task)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(tasks)
+            })
+            .await?
     }
 
     pub async fn list_all_tasks(&self) -> anyhow::Result<Vec<Task>> {
         let conn = self.conn.clone();
         tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<Task>> {
-            let conn = conn.lock().unwrap();
-            let mut stmt = conn.prepare("SELECT * FROM tasks ORDER BY created_at DESC")?;
-            let tasks = stmt
-                .query_map([], |row| Self::row_to_task(row))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(tasks)
-        })
-        .await??
+                let conn = conn.lock().unwrap();
+                let mut stmt =
+                    conn.prepare("SELECT * FROM tasks ORDER BY created_at DESC")?;
+                let tasks = stmt
+                    .query_map([], private::row_to_task)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(tasks)
+            })
+            .await?
     }
 
     pub async fn get_task(&self, id: &str) -> anyhow::Result<Option<Task>> {
         let conn = self.conn.clone();
         let id = id.to_string();
         tokio::task::spawn_blocking(move || -> anyhow::Result<Option<Task>> {
-            let conn = conn.lock().unwrap();
-            let mut stmt = conn.prepare("SELECT * FROM tasks WHERE id = ?1")?;
-            let mut rows = stmt.query_map(params![&id], |row| Self::row_to_task(row))?;
-            match rows.next() {
-                Some(Ok(task)) => Ok(Some(task)),
-                Some(Err(e)) => Err(e.into()),
-                None => Ok(None),
-            }
-        })
-        .await??
+                let conn = conn.lock().unwrap();
+                let mut stmt = conn.prepare("SELECT * FROM tasks WHERE id = ?1")?;
+                let mut rows =
+                    stmt.query_map(params![&id], private::row_to_task)?;
+                match rows.next() {
+                    Some(Ok(task)) => Ok(Some(task)),
+                    Some(Err(e)) => Err(e.into()),
+                    None => Ok(None),
+                }
+            })
+            .await?
     }
 
     pub async fn update_task(&self, task: &Task) -> anyhow::Result<()> {
@@ -350,11 +355,12 @@ impl Db {
         let conn = self.conn.clone();
         let id = id.to_string();
         tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let conn = conn.lock().unwrap();
-            let affected = conn.execute("DELETE FROM tasks WHERE id = ?1", params![&id])?;
-            Ok(affected > 0)
-        })
-        .await??
+                let conn = conn.lock().unwrap();
+                let affected =
+                    conn.execute("DELETE FROM tasks WHERE id = ?1", params![&id])?;
+                Ok(affected > 0)
+            })
+            .await?
     }
 
     pub async fn set_enabled(&self, id: &str, enabled: bool) -> anyhow::Result<bool> {
@@ -364,14 +370,14 @@ impl Db {
             .format("%Y-%m-%dT%H:%M:%S%.3fZ")
             .to_string();
         tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-            let conn = conn.lock().unwrap();
-            let affected = conn.execute(
-                "UPDATE tasks SET enabled = ?1, updated_at = ?2 WHERE id = ?3",
-                params![enabled as i64, now, &id],
-            )?;
-            Ok(affected > 0)
-        })
-        .await??
+                let conn = conn.lock().unwrap();
+                let affected = conn.execute(
+                    "UPDATE tasks SET enabled = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![enabled as i64, now, &id],
+                )?;
+                Ok(affected > 0)
+            })
+            .await?
     }
 
     pub async fn create_execution(&self, exec: &TaskExecution) -> anyhow::Result<()> {
@@ -394,7 +400,8 @@ impl Db {
             )?;
             Ok(())
         })
-        .await??
+        .await??;
+        Ok(())
     }
 
     pub async fn update_execution(
@@ -419,7 +426,8 @@ impl Db {
             )?;
             Ok(())
         })
-        .await??
+        .await??;
+        Ok(())
     }
 
     pub async fn list_executions(
@@ -431,39 +439,41 @@ impl Db {
         let task_id = task_id.map(String::from);
         let limit = limit.unwrap_or(50) as i64;
         tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<TaskExecution>> {
-            let conn = conn.lock().unwrap();
-            let rows = if let Some(ref tid) = task_id {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM task_executions WHERE task_id = ?1 ORDER BY started_at DESC LIMIT ?2",
-                )?;
-                stmt.query_map(params![tid, limit], |row| Self::row_to_execution(row))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?
-            } else {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM task_executions ORDER BY started_at DESC LIMIT ?1",
-                )?;
-                stmt.query_map(params![limit], |row| Self::row_to_execution(row))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?
-            };
-            Ok(rows)
-        })
-        .await??
+                let conn = conn.lock().unwrap();
+                let rows = if let Some(ref tid) = task_id {
+                    let mut stmt = conn.prepare(
+                        "SELECT * FROM task_executions WHERE task_id = ?1 ORDER BY started_at DESC LIMIT ?2",
+                    )?;
+                    stmt.query_map(params![tid, limit], private::row_to_execution)?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                } else {
+                    let mut stmt = conn.prepare(
+                        "SELECT * FROM task_executions ORDER BY started_at DESC LIMIT ?1",
+                    )?;
+                    stmt.query_map(params![limit], private::row_to_execution)?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                };
+                Ok(rows)
+            })
+            .await?
     }
 
     pub async fn get_execution(&self, id: &str) -> anyhow::Result<Option<TaskExecution>> {
         let conn = self.conn.clone();
         let id = id.to_string();
         tokio::task::spawn_blocking(move || -> anyhow::Result<Option<TaskExecution>> {
-            let conn = conn.lock().unwrap();
-            let mut stmt = conn.prepare("SELECT * FROM task_executions WHERE id = ?1")?;
-            let mut rows =
-                stmt.query_map(params![&id], |row| Self::row_to_execution(row))?;
-            match rows.next() {
-                Some(Ok(exec)) => Ok(Some(exec)),
-                Some(Err(e)) => Err(e.into()),
-                None => Ok(None),
-            }
-        })
-        .await??
+                let conn = conn.lock().unwrap();
+                let mut stmt =
+                    conn.prepare("SELECT * FROM task_executions WHERE id = ?1")?;
+                let mut rows = stmt.query_map(params![&id], |row| {
+                    private::row_to_execution(row)
+                })?;
+                match rows.next() {
+                    Some(Ok(exec)) => Ok(Some(exec)),
+                    Some(Err(e)) => Err(e.into()),
+                    None => Ok(None),
+                }
+            })
+            .await?
     }
 }

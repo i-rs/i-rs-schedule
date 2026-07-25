@@ -51,14 +51,14 @@ impl Executor {
         match req.send().await {
             Ok(resp) => {
                 let http_status = resp.status().as_u16() as i64;
+                let is_success = resp.status().is_success();
                 let output = resp.text().await.unwrap_or_default();
-                let status = if resp.status().is_success() {
-                    "success"
-                } else {
-                    "failure"
-                };
                 ExecutionResult {
-                    status: status.to_string(),
+                    status: if is_success {
+                        "success".to_string()
+                    } else {
+                        "failure".to_string()
+                    },
                     output,
                     http_status: Some(http_status),
                 }

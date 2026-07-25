@@ -1,5 +1,6 @@
 use crate::db::{Db, ScheduleConfig, Task, TaskExecution};
-use crate::executor::{ExecutionResult, Executor};
+use crate::executor::Executor;
+use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
