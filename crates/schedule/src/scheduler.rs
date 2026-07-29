@@ -3,6 +3,7 @@ use crate::executor::Executor;
 use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_util::time::delay_queue::{self, DelayQueue};
 
@@ -10,11 +11,13 @@ pub enum ControlCmd {
     Add(Task),
     Remove(String),
     Update(Task),
+    Shutdown,
 }
 
 pub struct Scheduler {
     queue: DelayQueue<Task>,
     keys: HashMap<String, delay_queue::Key>,
+    join_set: tokio::task::JoinSet<()>,
 }
 
 impl Scheduler {
@@ -22,6 +25,7 @@ impl Scheduler {
         Self {
             queue: DelayQueue::new(),
             keys: HashMap::new(),
+            join_set: tokio::task::JoinSet::new(),
         }
     }
 
@@ -90,7 +94,7 @@ impl Scheduler {
                     let db = db.clone();
                     let task_clone = task.clone();
 
-                    tokio::spawn(async move {
+                    self.join_set.spawn(async move {
                         let _ = exec.execute_and_record(&db, &task_clone).await;
                     });
                 }
@@ -109,9 +113,27 @@ impl Scheduler {
                             tracing::debug!(task_id = %task.id, "scheduler update");
                             self.update(task);
                         }
+                        ControlCmd::Shutdown => {
+                            tracing::info!(
+                                "scheduler shutdown requested; draining in-flight executions"
+                            );
+                            break;
+                        }
                     }
                 }
             }
         }
+
+        // 收到 Shutdown 后,等待在途 execution 完成(HTTP/shell 各自有超时,
+        // 这里再加一个总 timeout 兜底,避免某个卡死的 task 拖住退出)。
+        let drain = async { while self.join_set.join_next().await.is_some() {} };
+        if tokio::time::timeout(Duration::from_secs(35), drain)
+            .await
+            .is_err()
+        {
+            tracing::warn!("shutdown drain timed out after 35s; aborting remaining tasks");
+            self.join_set.abort_all();
+        }
+        tracing::info!("scheduler stopped");
     }
 }
