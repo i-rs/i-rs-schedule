@@ -207,14 +207,14 @@ export default function Tasks() {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            <div>
+            <div className="space-y-1.5">
               <Label>Name</Label>
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="My Task" />
             </div>
 
-            <div>
+            <div className="space-y-1.5">
               <Label>Type</Label>
-              <Tabs value={form.task_type} onValueChange={(v) => setForm({ ...form, task_type: v as "http" | "shell" })} className="mt-1">
+              <Tabs value={form.task_type} onValueChange={(v) => setForm({ ...form, task_type: v as "http" | "shell" })}>
                 <TabsList>
                   <TabsTrigger value="http">HTTP</TabsTrigger>
                   <TabsTrigger value="shell">Shell</TabsTrigger>
@@ -222,9 +222,9 @@ export default function Tasks() {
               </Tabs>
             </div>
 
-            <div>
+            <div className="space-y-1.5">
               <Label>Schedule</Label>
-              <div className="flex gap-3 mt-1">
+              <div className="flex gap-3">
                 <Select value={form.schedule_type} onValueChange={(v) => setForm({ ...form, schedule_type: v as "cron" | "once" })}>
                   <SelectTrigger className="w-40">
                     <SelectValue />
@@ -278,7 +278,7 @@ export default function Tasks() {
             {form.task_type === "http" ? (
               <>
                 <div className="flex gap-3">
-                  <div className="w-24">
+                  <div className="w-24 space-y-1.5">
                     <Label>Method</Label>
                     <Select value={form.http_method} onValueChange={(v) => setForm({ ...form, http_method: v || "GET" })}>
                       <SelectTrigger>
@@ -292,18 +292,18 @@ export default function Tasks() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 space-y-1.5">
                     <Label>URL</Label>
                     <Input value={form.http_url} onChange={(e) => setForm({ ...form, http_url: e.target.value })} placeholder="https://example.com/api" />
                   </div>
                 </div>
-                <div>
+                <div className="space-y-1.5">
                   <Label>Body (optional)</Label>
                   <Input value={form.http_body} onChange={(e) => setForm({ ...form, http_body: e.target.value })} placeholder='{"key": "value"}' />
                 </div>
               </>
             ) : (
-              <div>
+              <div className="space-y-1.5">
                 <Label>Command</Label>
                 <Input value={form.shell_cmd} onChange={(e) => setForm({ ...form, shell_cmd: e.target.value })} placeholder="echo hello" />
               </div>
