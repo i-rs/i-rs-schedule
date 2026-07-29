@@ -91,19 +91,19 @@ function App() {
       <ToastContainer />
       <BrowserRouter>
         <SidebarProvider defaultOpen>
-          <div className="flex min-h-screen w-full bg-muted/30">
+          <div className="flex min-h-screen w-full">
             <SidebarNav />
 
             <main className="flex-1 flex flex-col min-w-0">
-              <header className="sticky top-0 z-40 flex items-center gap-3 border-b bg-background px-4 py-3">
+              <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border/50 bg-background/70 px-4 py-3 backdrop-blur-md">
                 <SidebarTrigger />
-                <span className="font-bold text-lg md:hidden">i-rs-schedule</span>
+                <span className="font-bold text-lg tracking-tight md:hidden">i-rs-schedule</span>
                 <div className="flex-1" />
                 <Button size="icon-sm" variant="ghost" onClick={toggle}>
                   {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
                 </Button>
               </header>
-              <div className="flex-1 p-4 md:p-6 overflow-auto">
+              <div className="flex-1 p-4 md:p-8 overflow-auto">
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/tasks" element={<Tasks />} />
