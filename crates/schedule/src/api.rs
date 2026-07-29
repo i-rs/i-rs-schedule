@@ -102,9 +102,7 @@ fn build_update_task(id: String, body: CreateTaskRequest) -> Task {
         },
     };
 
-    let now = chrono::Utc::now()
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-        .to_string();
+    let now = crate::db::now_iso();
     Task {
         id,
         name: body.name,

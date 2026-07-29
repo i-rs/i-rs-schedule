@@ -3,6 +3,22 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+/// ISO-8601 UTC 时间戳格式,与 schema 的 `datetime('now')` 默认值兼容。
+const TIMESTAMP_FMT: &str = "%Y-%m-%dT%H:%M:%S%.3fZ";
+
+/// 当前 UTC 时间的格式化字符串。
+pub(crate) fn now_iso() -> String {
+    chrono::Utc::now().format(TIMESTAMP_FMT).to_string()
+}
+
+/// 解析 ISO-8601 时间戳;兼容毫秒与任意精度小数秒两种写法。
+pub(crate) fn parse_iso(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::NaiveDateTime::parse_from_str(s, TIMESTAMP_FMT)
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.fZ"))
+        .ok()
+        .map(|dt| dt.and_utc())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub id: String,
@@ -48,9 +64,7 @@ pub struct TaskExecution {
 
 impl Task {
     pub fn new(name: String, task_type: TaskType, schedule: ScheduleConfig) -> Self {
-        let now = chrono::Utc::now()
-            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-            .to_string();
+        let now = now_iso();
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             name,
@@ -309,9 +323,7 @@ impl Db {
         let pool = self.pool.clone();
         let task = task.clone();
         spawn_db(pool, move |conn| {
-            let now = chrono::Utc::now()
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string();
+            let now = now_iso();
             let (schedule_type, cron_expr, delay_secs) = match &task.schedule {
                 ScheduleConfig::Cron { expr } => ("cron", Some(expr.as_str()), None),
                 ScheduleConfig::Once { delay_secs } => ("once", None, Some(*delay_secs as i64)),
@@ -377,9 +389,7 @@ impl Db {
     pub async fn set_enabled(&self, id: &str, enabled: bool) -> anyhow::Result<bool> {
         let pool = self.pool.clone();
         let id = id.to_string();
-        let now = chrono::Utc::now()
-            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-            .to_string();
+        let now = now_iso();
         spawn_db(pool, move |conn| {
             let affected = conn.execute(
                 "UPDATE tasks SET enabled = ?1, updated_at = ?2 WHERE id = ?3",
@@ -423,9 +433,7 @@ impl Db {
         let exec_id = exec_id.to_string();
         let status = status.to_string();
         let output = output.to_string();
-        let now = chrono::Utc::now()
-            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-            .to_string();
+        let now = now_iso();
         spawn_db(pool, move |conn| {
             conn.execute(
                 "UPDATE task_executions SET status=?1, output=?2, http_status=?3, finished_at=?4 WHERE id=?5",

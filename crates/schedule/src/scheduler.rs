@@ -41,32 +41,18 @@ impl ScheduleConfig {
 
     pub fn remaining_delay(&self, created_at: &str) -> Option<Duration> {
         match self {
-            ScheduleConfig::Once { delay_secs } => {
-                let created_utc =
-                    chrono::NaiveDateTime::parse_from_str(created_at, "%Y-%m-%dT%H:%M:%S%.3fZ")
-                        .ok()
-                        .or_else(|| {
-                            chrono::NaiveDateTime::parse_from_str(
-                                created_at,
-                                "%Y-%m-%dT%H:%M:%S%.fZ",
-                            )
-                            .ok()
-                        })
-                        .map(|dt| dt.and_utc());
-
-                match created_utc {
-                    Some(created) => {
-                        let now = chrono::Utc::now();
-                        let elapsed = (now - created).num_seconds().max(0) as u64;
-                        if elapsed >= *delay_secs {
-                            None
-                        } else {
-                            Some(Duration::from_secs(*delay_secs - elapsed))
-                        }
+            ScheduleConfig::Once { delay_secs } => match crate::db::parse_iso(created_at) {
+                Some(created) => {
+                    let now = chrono::Utc::now();
+                    let elapsed = (now - created).num_seconds().max(0) as u64;
+                    if elapsed >= *delay_secs {
+                        None
+                    } else {
+                        Some(Duration::from_secs(*delay_secs - elapsed))
                     }
-                    None => Some(Duration::from_secs(*delay_secs)),
                 }
-            }
+                None => Some(Duration::from_secs(*delay_secs)),
+            },
             ScheduleConfig::Cron { .. } => Some(self.next_delay()),
         }
     }
