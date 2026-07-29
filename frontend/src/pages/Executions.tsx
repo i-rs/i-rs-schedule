@@ -5,12 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listExecutions, listTasks, type TaskExecution, type Task } from "@/api";
-import { RefreshCw, CheckCircle2, XCircle, Clock, ChevronDown, ChevronUp, Inbox } from "lucide-react";
+import { toast } from "@/hooks/useToast";
+import { RefreshCw, CheckCircle2, XCircle, Clock, PauseCircle, ChevronDown, ChevronUp, Inbox } from "lucide-react";
 
 const statusConfig: Record<string, { icon: typeof CheckCircle2; color: string; border: string }> = {
   success: { icon: CheckCircle2, color: "text-emerald-500", border: "border-l-emerald-500" },
   failure: { icon: XCircle, color: "text-red-500", border: "border-l-red-500" },
   running: { icon: Clock, color: "text-blue-500", border: "border-l-blue-500" },
+  interrupted: { icon: PauseCircle, color: "text-amber-500", border: "border-l-amber-500" },
+  skipped: { icon: PauseCircle, color: "text-muted-foreground", border: "border-l-muted-foreground" },
 };
 
 function fmtTime(iso: string) {
@@ -80,29 +83,38 @@ export default function Executions() {
   const [execs, setExecs] = useState<TaskExecution[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [filterTaskId, setFilterTaskId] = useState("all");
+  const [limit, setLimit] = useState(20);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [e, t] = await Promise.all([
-      listExecutions(filterTaskId === "all" ? undefined : filterTaskId),
-      listTasks(),
-    ]);
-    setExecs(e);
-    setTasks(t);
-    setLoading(false);
-  }, [filterTaskId]);
+    try {
+      const [e, t] = await Promise.all([
+        listExecutions(filterTaskId === "all" ? undefined : filterTaskId, limit),
+        listTasks(),
+      ]);
+      setExecs(e);
+      setTasks(t);
+    } catch (e) {
+      toast.error(`Failed to load executions: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [filterTaskId, limit]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // 已到末尾:返回条数少于请求 limit
+  const atEnd = execs.length < limit;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold">Execution Logs</h1>
         <div className="flex gap-2">
-          <Select value={filterTaskId} onValueChange={(v) => setFilterTaskId(v || "all")}>
+          <Select value={filterTaskId} onValueChange={(v) => { setFilterTaskId(v || "all"); setLimit(20); }}>
             <SelectTrigger className="w-full sm:w-48">
               <SelectValue placeholder="All Tasks" />
             </SelectTrigger>
@@ -153,6 +165,13 @@ export default function Executions() {
             const task = tasks.find((t) => t.id === e.task_id);
             return <ExecutionCard key={e.id} e={e} task={task} />;
           })}
+          {!atEnd && (
+            <div className="flex justify-center pt-2">
+              <Button variant="outline" size="sm" onClick={() => setLimit((l) => l + 20)} disabled={loading}>
+                <ChevronDown className="h-4 w-4" /> Load More
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>
