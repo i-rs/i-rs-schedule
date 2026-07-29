@@ -183,13 +183,14 @@ export default function Tasks() {
         </div>
       ) : (
         <div className="space-y-3">
-          {tasks.map((t) => {
+          {tasks.map((t, i) => {
             const url = t.task_type.type === "http" ? t.task_type.url : t.task_type.cmd;
             const TypeIcon = t.task_type.type === "http" ? Globe : Terminal;
             return (
               <Card
                 key={t.id}
-                className={`group/task border-l-4 shadow-[var(--shadow-card)] transition-all duration-200 hover:shadow-[var(--shadow-card-hover)] ${t.enabled ? "border-l-primary" : "border-l-muted-foreground/40"}`}
+                style={{ animationDelay: `${Math.min(i, 12) * 40}ms` }}
+                className={`group/task stagger-item border-l-4 shadow-[var(--shadow-card)] transition-all duration-200 hover:shadow-[var(--shadow-card-hover)] ${t.enabled ? "border-l-primary" : "border-l-muted-foreground/40"}`}
               >
                 <CardContent className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-4 gap-3">
                   <div className="space-y-1.5 flex-1 min-w-0">

@@ -52,12 +52,13 @@ export default function Dashboard() {
       <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
 
       <div className="grid gap-4 md:grid-cols-4">
-        {stats.map((s) => {
+        {stats.map((s, i) => {
           const Icon = s.icon;
           return (
             <Card
               key={s.label}
-              className="relative overflow-hidden pt-6 shadow-[var(--shadow-card)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-card-hover)]"
+              style={{ animationDelay: `${i * 60}ms` }}
+              className="stagger-item relative overflow-hidden pt-6 shadow-[var(--shadow-card)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-card-hover)]"
             >
               {/* 顶部状态色细线 */}
               <span className={`absolute inset-x-0 top-0 h-0.5 ${s.bar}`} />

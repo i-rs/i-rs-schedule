@@ -163,9 +163,13 @@ export default function Executions() {
         </div>
       ) : (
         <div className="space-y-3">
-          {execs.map((e) => {
+          {execs.map((e, i) => {
             const task = tasks.find((t) => t.id === e.task_id);
-            return <ExecutionCard key={e.id} e={e} task={task} />;
+            return (
+              <div key={e.id} style={{ animationDelay: `${Math.min(i, 12) * 40}ms` }} className="stagger-item">
+                <ExecutionCard e={e} task={task} />
+              </div>
+            );
           })}
           {!atEnd && (
             <div className="flex justify-center pt-2">
