@@ -1,4 +1,4 @@
-use crate::db::{Db, ScheduleConfig, Task, TaskExecution, TaskType};
+use crate::db::{Db, ScheduleConfig, Task, TaskType};
 use crate::executor::Executor;
 use crate::scheduler::ControlCmd;
 use desirable::{Request, Response, Router};
@@ -243,32 +243,7 @@ pub fn build_router(
                 .map_err(|e| err_msg(500, format!("db error: {e}")))?
                 .ok_or_else(|| err_msg(404, "not found"))?;
 
-            let exec_id = uuid::Uuid::new_v4().to_string();
-            let started_at = chrono::Utc::now()
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string();
-            let _ = db
-                .create_execution(&TaskExecution {
-                    id: exec_id.clone(),
-                    task_id: task.id.clone(),
-                    status: "running".to_string(),
-                    output: None,
-                    http_status: None,
-                    started_at: started_at.clone(),
-                    finished_at: None,
-                })
-                .await;
-
-            let result = exec.execute(&task).await;
-            let _ = db
-                .update_execution(&exec_id, &result.status, &result.output, result.http_status)
-                .await;
-
-            let exec_record = db
-                .get_execution(&exec_id)
-                .await
-                .map_err(|e| err_msg(500, format!("db error: {e}")))?
-                .unwrap();
+            let exec_record = exec.execute_and_record(&db, &task).await;
             ok(exec_record)
         }
     });

@@ -1,4 +1,4 @@
-use crate::db::{Task, TaskType};
+use crate::db::{Db, Task, TaskExecution, TaskType};
 use std::time::Duration;
 
 pub struct ExecutionResult {
@@ -33,6 +33,70 @@ impl Executor {
             }
             TaskType::Shell { cmd } => Self::execute_shell(cmd).await,
         }
+    }
+
+    /// 执行任务并记录到 DB。封装 create_execution → execute → update_execution,
+    /// scheduler 与 `/run` 端点共用,保证行为一致。
+    ///
+    /// create_execution 失败时返回一个内存构造的 `status="skipped"` 记录(不入库),
+    /// 并打 warn 日志;execute 与 update_execution 的失败均告警但不影响返回。
+    pub async fn execute_and_record(&self, db: &Db, task: &Task) -> TaskExecution {
+        let exec_id = uuid::Uuid::new_v4().to_string();
+        let started_at = crate::db::now_iso();
+        let start = std::time::Instant::now();
+
+        let running = TaskExecution {
+            id: exec_id.clone(),
+            task_id: task.id.clone(),
+            status: "running".to_string(),
+            output: None,
+            http_status: None,
+            started_at: started_at.clone(),
+            finished_at: None,
+        };
+
+        if let Err(e) = db.create_execution(&running).await {
+            tracing::warn!(
+                error = %e,
+                task_id = %task.id,
+                "create execution failed; skipping run"
+            );
+            return TaskExecution {
+                status: "skipped".to_string(),
+                finished_at: Some(crate::db::now_iso()),
+                ..running
+            };
+        }
+
+        tracing::info!(task_id = %task.id, exec_id = %exec_id, "execution started");
+
+        let result = self.execute(task).await;
+
+        if let Err(e) = db
+            .update_execution(&exec_id, &result.status, &result.output, result.http_status)
+            .await
+        {
+            tracing::warn!(
+                error = %e,
+                task_id = %task.id,
+                exec_id = %exec_id,
+                "update execution failed"
+            );
+        }
+
+        tracing::info!(
+            task_id = %task.id,
+            exec_id = %exec_id,
+            status = %result.status,
+            duration_ms = start.elapsed().as_millis() as u64,
+            "execution finished"
+        );
+
+        db.get_execution(&exec_id)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(running)
     }
 
     async fn execute_http(

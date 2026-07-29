@@ -1,11 +1,10 @@
-use crate::db::{Db, ScheduleConfig, Task, TaskExecution};
+use crate::db::{Db, ScheduleConfig, Task};
 use crate::executor::Executor;
 use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::time::delay_queue::{self, DelayQueue};
-use uuid::Uuid;
 
 pub enum ControlCmd {
     Add(Task),
@@ -92,62 +91,7 @@ impl Scheduler {
                     let task_clone = task.clone();
 
                     tokio::spawn(async move {
-                        let exec_id = Uuid::new_v4().to_string();
-                        let started_at = crate::db::now_iso();
-                        let start = std::time::Instant::now();
-
-                        if let Err(e) = db
-                            .create_execution(&TaskExecution {
-                                id: exec_id.clone(),
-                                task_id: task_clone.id.clone(),
-                                status: "running".to_string(),
-                                output: None,
-                                http_status: None,
-                                started_at,
-                                finished_at: None,
-                            })
-                            .await
-                        {
-                            tracing::warn!(
-                                error = %e,
-                                task_id = %task_clone.id,
-                                "create execution failed; skipping run"
-                            );
-                            return;
-                        }
-
-                        tracing::info!(
-                            task_id = %task_clone.id,
-                            exec_id = %exec_id,
-                            "execution started"
-                        );
-
-                        let result = exec.execute(&task_clone).await;
-
-                        if let Err(e) = db
-                            .update_execution(
-                                &exec_id,
-                                &result.status,
-                                &result.output,
-                                result.http_status,
-                            )
-                            .await
-                        {
-                            tracing::warn!(
-                                error = %e,
-                                task_id = %task_clone.id,
-                                exec_id = %exec_id,
-                                "update execution failed"
-                            );
-                        }
-
-                        tracing::info!(
-                            task_id = %task_clone.id,
-                            exec_id = %exec_id,
-                            status = %result.status,
-                            duration_ms = start.elapsed().as_millis() as u64,
-                            "execution finished"
-                        );
+                        let _ = exec.execute_and_record(&db, &task_clone).await;
                     });
                 }
 
