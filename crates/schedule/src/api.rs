@@ -116,7 +116,11 @@ fn build_update_task(id: String, body: CreateTaskRequest) -> Task {
     }
 }
 
-pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor: Arc<Executor>) -> Router {
+pub fn build_router(
+    db: Db,
+    cmd_tx: mpsc::UnboundedSender<ControlCmd>,
+    executor: Arc<Executor>,
+) -> Router {
     let db = Arc::new(db);
     let cmd_tx = Arc::new(cmd_tx);
 
@@ -157,9 +161,7 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor:
     router.get("/api/tasks/:id", move |req: Request| {
         let db = db_get_one.clone();
         async move {
-            let id: String = req
-                .param("id")
-                .map_err(|_| err_msg(400, "missing id"))?;
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             match db
                 .get_task(&id)
                 .await
@@ -177,9 +179,7 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor:
         let db = db_update.clone();
         let tx = tx_update.clone();
         async move {
-            let id: String = req
-                .param("id")
-                .map_err(|_| err_msg(400, "missing id"))?;
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             let body: CreateTaskRequest = req
                 .body()
                 .await
@@ -199,9 +199,7 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor:
         let db = db_delete.clone();
         let tx = tx_delete.clone();
         async move {
-            let id: String = req
-                .param("id")
-                .map_err(|_| err_msg(400, "missing id"))?;
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             match db
                 .delete_task(&id)
                 .await
@@ -222,9 +220,7 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor:
         let db = db_enable.clone();
         let tx = tx_enable.clone();
         async move {
-            let id: String = req
-                .param("id")
-                .map_err(|_| err_msg(400, "missing id"))?;
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             match db
                 .set_enabled(&id, true)
                 .await
@@ -247,9 +243,7 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor:
         let db = db_disable.clone();
         let tx = tx_disable.clone();
         async move {
-            let id: String = req
-                .param("id")
-                .map_err(|_| err_msg(400, "missing id"))?;
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             match db
                 .set_enabled(&id, false)
                 .await
@@ -269,9 +263,7 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor:
         let db = db_run.clone();
         let exec = executor.clone();
         async move {
-            let id: String = req
-                .param("id")
-                .map_err(|_| err_msg(400, "missing id"))?;
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             let task = db
                 .get_task(&id)
                 .await
@@ -329,9 +321,7 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor:
     router.get("/api/executions/:id", move |req: Request| {
         let db = db_exec_one.clone();
         async move {
-            let id: String = req
-                .param("id")
-                .map_err(|_| err_msg(400, "missing id"))?;
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             match db
                 .get_execution(&id)
                 .await
