@@ -7,6 +7,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { SidebarProvider, Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ToastContainer } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
 const nav = [
@@ -87,6 +88,7 @@ function App() {
 
   return (
     <TooltipProvider>
+      <ToastContainer />
       <BrowserRouter>
         <SidebarProvider defaultOpen>
           <div className="flex min-h-screen w-full bg-muted/30">
