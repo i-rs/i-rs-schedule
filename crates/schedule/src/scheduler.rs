@@ -68,9 +68,18 @@ impl Scheduler {
 
     pub fn load_tasks(&mut self, tasks: Vec<Task>) {
         for task in tasks {
-            if let Some(delay) = task.schedule.remaining_delay(&task.created_at) {
-                let key = self.queue.insert(task.clone(), delay);
-                self.keys.insert(task.id.clone(), key);
+            match task.schedule.remaining_delay(&task.created_at) {
+                Some(delay) => {
+                    let key = self.queue.insert(task.clone(), delay);
+                    self.keys.insert(task.id.clone(), key);
+                }
+                None => {
+                    tracing::info!(
+                        task_id = %task.id,
+                        name = %task.name,
+                        "skipping expired once-task on startup"
+                    );
+                }
             }
         }
     }
@@ -116,17 +125,18 @@ impl Scheduler {
                         }
                     }
 
+                    tracing::debug!(task_id = %task.id, name = %task.name, "task due");
+
                     let exec = executor.clone();
                     let db = db.clone();
                     let task_clone = task.clone();
 
                     tokio::spawn(async move {
                         let exec_id = Uuid::new_v4().to_string();
-                        let started_at = chrono::Utc::now()
-                            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                            .to_string();
+                        let started_at = crate::db::now_iso();
+                        let start = std::time::Instant::now();
 
-                        let _ = db
+                        if let Err(e) = db
                             .create_execution(&TaskExecution {
                                 id: exec_id.clone(),
                                 task_id: task_clone.id.clone(),
@@ -136,26 +146,65 @@ impl Scheduler {
                                 started_at,
                                 finished_at: None,
                             })
-                            .await;
+                            .await
+                        {
+                            tracing::warn!(
+                                error = %e,
+                                task_id = %task_clone.id,
+                                "create execution failed; skipping run"
+                            );
+                            return;
+                        }
+
+                        tracing::info!(
+                            task_id = %task_clone.id,
+                            exec_id = %exec_id,
+                            "execution started"
+                        );
 
                         let result = exec.execute(&task_clone).await;
 
-                        let _ = db
+                        if let Err(e) = db
                             .update_execution(
                                 &exec_id,
                                 &result.status,
                                 &result.output,
                                 result.http_status,
                             )
-                            .await;
+                            .await
+                        {
+                            tracing::warn!(
+                                error = %e,
+                                task_id = %task_clone.id,
+                                exec_id = %exec_id,
+                                "update execution failed"
+                            );
+                        }
+
+                        tracing::info!(
+                            task_id = %task_clone.id,
+                            exec_id = %exec_id,
+                            status = %result.status,
+                            duration_ms = start.elapsed().as_millis() as u64,
+                            "execution finished"
+                        );
                     });
                 }
 
                 Some(cmd) = cmd_rx.recv() => {
                     match cmd {
-                        ControlCmd::Add(task) => self.insert(task),
-                        ControlCmd::Remove(id) => self.remove(&id),
-                        ControlCmd::Update(task) => self.update(task),
+                        ControlCmd::Add(task) => {
+                            tracing::debug!(task_id = %task.id, "scheduler add");
+                            self.insert(task);
+                        }
+                        ControlCmd::Remove(id) => {
+                            tracing::debug!(task_id = %id, "scheduler remove");
+                            self.remove(&id);
+                        }
+                        ControlCmd::Update(task) => {
+                            tracing::debug!(task_id = %task.id, "scheduler update");
+                            self.update(task);
+                        }
                     }
                 }
             }
