@@ -13,6 +13,9 @@ struct ApiResponse {
     data: serde_json::Value,
 }
 
+// Response 的 Err 变体较大(由 desirable 框架定义,无法瘦身);
+// boxing 会改变返回类型引发连锁,故 allow 掉 result_large_err。
+#[allow(clippy::result_large_err)]
 fn ok<T: Serialize>(data: T) -> Result<Response, Response> {
     let body = ApiResponse {
         code: 0,
@@ -22,17 +25,13 @@ fn ok<T: Serialize>(data: T) -> Result<Response, Response> {
     Ok(Response::json(body))
 }
 
-fn err(status: u16, msg: String) -> Response {
+fn err_msg(status: u16, msg: impl Into<String>) -> Response {
     let body = ApiResponse {
         code: status,
-        message: msg,
+        message: msg.into(),
         data: serde_json::Value::Null,
     };
     Response::with_status(status, serde_json::to_string(&body).unwrap()).unwrap()
-}
-
-fn err_msg(status: u16, msg: impl Into<String>) -> Response {
-    err(status, msg.into())
 }
 
 #[derive(Deserialize)]
