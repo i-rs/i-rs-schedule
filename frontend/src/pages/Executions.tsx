@@ -5,12 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listExecutions, listTasks, type TaskExecution, type Task } from "@/api";
-import { RefreshCw, CheckCircle2, XCircle, Clock, ChevronDown, ChevronUp, Inbox } from "lucide-react";
+import { toast } from "@/hooks/useToast";
+import { RefreshCw, CheckCircle2, XCircle, Clock, PauseCircle, ChevronDown, ChevronUp, Inbox } from "lucide-react";
 
 const statusConfig: Record<string, { icon: typeof CheckCircle2; color: string; border: string }> = {
   success: { icon: CheckCircle2, color: "text-emerald-500", border: "border-l-emerald-500" },
   failure: { icon: XCircle, color: "text-red-500", border: "border-l-red-500" },
   running: { icon: Clock, color: "text-blue-500", border: "border-l-blue-500" },
+  interrupted: { icon: PauseCircle, color: "text-amber-500", border: "border-l-amber-500" },
+  skipped: { icon: PauseCircle, color: "text-muted-foreground", border: "border-l-muted-foreground" },
 };
 
 function fmtTime(iso: string) {
@@ -33,12 +36,14 @@ function ExecutionCard({ e, task }: { e: TaskExecution; task?: Task }) {
   const duration = fmtDuration(e.started_at, e.finished_at);
 
   return (
-    <Card className={`border-l-4 ${cfg.border} hover:shadow-sm transition-shadow`}>
+    <Card className={`border-l-4 ${cfg.border} shadow-[var(--shadow-card)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-card-hover)]`}>
       <CardContent className="py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <Icon className={`h-4 w-4 ${cfg.color}`} />
+              <span className={`flex h-6 w-6 items-center justify-center rounded-md bg-current/10 ${cfg.color}`}>
+                <Icon className="h-3.5 w-3.5" />
+              </span>
               <Badge variant={e.status === "success" ? "default" : e.status === "running" ? "outline" : "destructive"}>
                 {e.status}
               </Badge>
@@ -52,13 +57,13 @@ function ExecutionCard({ e, task }: { e: TaskExecution; task?: Task }) {
               <div>
                 <button
                   onClick={() => setExpanded(!expanded)}
-                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                  className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
                 >
                   {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                   {expanded ? "Hide" : "Show"} output
                 </button>
                 {expanded && (
-                  <pre className="mt-2 text-xs text-muted-foreground bg-muted rounded-md p-3 max-h-48 overflow-auto border">
+                  <pre className="mt-2 rounded-md border border-border/50 bg-muted/50 p-3 text-xs text-muted-foreground font-mono max-h-48 overflow-auto">
                     {e.output}
                   </pre>
                 )}
@@ -66,7 +71,7 @@ function ExecutionCard({ e, task }: { e: TaskExecution; task?: Task }) {
             )}
           </div>
 
-          <div className="text-xs text-muted-foreground text-right whitespace-nowrap leading-relaxed">
+          <div className="text-xs text-muted-foreground text-right whitespace-nowrap leading-relaxed tabular-nums">
             <div>{fmtTime(e.started_at)}</div>
             {duration && <div className="text-muted-foreground/70">{duration}</div>}
           </div>
@@ -80,29 +85,38 @@ export default function Executions() {
   const [execs, setExecs] = useState<TaskExecution[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [filterTaskId, setFilterTaskId] = useState("all");
+  const [limit, setLimit] = useState(20);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [e, t] = await Promise.all([
-      listExecutions(filterTaskId === "all" ? undefined : filterTaskId),
-      listTasks(),
-    ]);
-    setExecs(e);
-    setTasks(t);
-    setLoading(false);
-  }, [filterTaskId]);
+    try {
+      const [e, t] = await Promise.all([
+        listExecutions(filterTaskId === "all" ? undefined : filterTaskId, limit),
+        listTasks(),
+      ]);
+      setExecs(e);
+      setTasks(t);
+    } catch (e) {
+      toast.error(`Failed to load executions: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [filterTaskId, limit]);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  // 已到末尾:返回条数少于请求 limit
+  const atEnd = execs.length < limit;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold">Execution Logs</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Execution Logs</h1>
         <div className="flex gap-2">
-          <Select value={filterTaskId} onValueChange={(v) => setFilterTaskId(v || "all")}>
+          <Select value={filterTaskId} onValueChange={(v) => { setFilterTaskId(v || "all"); setLimit(20); }}>
             <SelectTrigger className="w-full sm:w-48">
               <SelectValue placeholder="All Tasks" />
             </SelectTrigger>
@@ -142,17 +156,28 @@ export default function Executions() {
           ))}
         </div>
       ) : execs.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <Inbox className="h-12 w-12 mb-3 opacity-40" />
-          <p className="text-sm">No execution logs yet.</p>
-          <p className="text-xs mt-1">Tasks will appear here once they start running.</p>
+        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+          <Inbox className="h-14 w-14 mb-4 text-primary/40" />
+          <p className="text-sm font-medium">No execution logs yet</p>
+          <p className="text-xs mt-1 text-muted-foreground/70">Tasks will appear here once they start running.</p>
         </div>
       ) : (
         <div className="space-y-3">
-          {execs.map((e) => {
+          {execs.map((e, i) => {
             const task = tasks.find((t) => t.id === e.task_id);
-            return <ExecutionCard key={e.id} e={e} task={task} />;
+            return (
+              <div key={e.id} style={{ animationDelay: `${Math.min(i, 12) * 40}ms` }} className="stagger-item">
+                <ExecutionCard e={e} task={task} />
+              </div>
+            );
           })}
+          {!atEnd && (
+            <div className="flex justify-center pt-2">
+              <Button variant="outline" size="sm" onClick={() => setLimit((l) => l + 20)} disabled={loading}>
+                <ChevronDown className="h-4 w-4" /> Load More
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>

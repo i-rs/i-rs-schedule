@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, runTask, type Task } from "@/api";
+import { toast } from "@/hooks/useToast";
 import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap } from "lucide-react";
 
 interface TaskForm {
@@ -41,11 +42,17 @@ export default function Tasks() {
   const [showDialog, setShowDialog] = useState(false);
   const [form, setForm] = useState<TaskForm>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setTasks(await listTasks());
-    setLoading(false);
+    try {
+      setTasks(await listTasks());
+    } catch (e) {
+      toast.error(`Failed to load tasks: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -53,6 +60,19 @@ export default function Tasks() {
   }, [load]);
 
   const handleSubmit = async () => {
+    if (!form.name.trim()) {
+      toast.error("Name is required");
+      return;
+    }
+    if (form.schedule_type === "cron" && !form.cron_expr.trim()) {
+      toast.error("Cron expression is required");
+      return;
+    }
+    if (form.task_type === "http" && !form.http_url.trim()) {
+      toast.error("URL is required for HTTP tasks");
+      return;
+    }
+
     const payload = {
       name: form.name,
       task_type: form.task_type,
@@ -63,15 +83,24 @@ export default function Tasks() {
         : { shell_cmd: form.shell_cmd }),
     };
 
-    if (editingId) {
-      await updateTask(editingId, payload);
-    } else {
-      await createTask(payload);
+    setSubmitting(true);
+    try {
+      if (editingId) {
+        await updateTask(editingId, payload);
+        toast.success("Task updated");
+      } else {
+        await createTask(payload);
+        toast.success("Task created");
+      }
+      setShowDialog(false);
+      setForm(emptyForm);
+      setEditingId(null);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
     }
-    setShowDialog(false);
-    setForm(emptyForm);
-    setEditingId(null);
-    await load();
   };
 
   const openEdit = (t: Task) => {
@@ -96,10 +125,21 @@ export default function Tasks() {
     setShowDialog(true);
   };
 
+  // 包裹列表操作:失败 toast,成功后刷新。
+  const act = async (fn: () => Promise<unknown>, successMsg?: string) => {
+    try {
+      await fn();
+      if (successMsg) toast.success(successMsg);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold">Tasks</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Tasks</h1>
         <div className="flex gap-2">
           <Button size="icon" variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className="h-4 w-4" />
@@ -133,25 +173,32 @@ export default function Tasks() {
           ))}
         </div>
       ) : tasks.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <Inbox className="h-12 w-12 mb-3 opacity-40" />
-          <p className="text-sm">No tasks yet. Create one to start scheduling.</p>
-          <Button size="sm" onClick={openCreate} className="mt-3">
+        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+          <Inbox className="h-14 w-14 mb-4 text-primary/40" />
+          <p className="text-sm font-medium">No tasks yet</p>
+          <p className="text-xs mt-1 text-muted-foreground/70">Create one to start scheduling.</p>
+          <Button size="sm" onClick={openCreate} className="mt-4">
             <Plus className="h-4 w-4" /> Create Task
           </Button>
         </div>
       ) : (
         <div className="space-y-3">
-          {tasks.map((t) => {
+          {tasks.map((t, i) => {
             const url = t.task_type.type === "http" ? t.task_type.url : t.task_type.cmd;
             const TypeIcon = t.task_type.type === "http" ? Globe : Terminal;
             return (
-              <Card key={t.id} className={`border-l-4 ${t.enabled ? "border-l-emerald-500" : "border-l-muted"} hover:shadow-sm transition-shadow`}>
+              <Card
+                key={t.id}
+                style={{ animationDelay: `${Math.min(i, 12) * 40}ms` }}
+                className={`group/task stagger-item border-l-4 shadow-[var(--shadow-card)] transition-all duration-200 hover:shadow-[var(--shadow-card-hover)] ${t.enabled ? "border-l-primary" : "border-l-muted-foreground/40"}`}
+              >
                 <CardContent className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-4 gap-3">
                   <div className="space-y-1.5 flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <TypeIcon className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="font-medium text-sm">{t.name}</span>
+                      <span className={`flex h-6 w-6 items-center justify-center rounded-md ${t.task_type.type === "http" ? "bg-primary/10 text-primary" : "bg-violet-500/10 text-violet-500"}`}>
+                        <TypeIcon className="h-3.5 w-3.5" />
+                      </span>
+                      <span className="font-medium text-[15px]">{t.name}</span>
                       <Badge variant={t.enabled ? "default" : "secondary"} className="text-[10px]">
                         {t.enabled ? "Enabled" : "Disabled"}
                       </Badge>
@@ -161,19 +208,19 @@ export default function Tasks() {
                         {t.schedule.type === "cron" ? t.schedule.expr : `${t.schedule.delay_secs}s`}
                       </Badge>
                     </div>
-                    <p className="text-xs text-muted-foreground truncate max-w-xl">{url}</p>
+                    <p className="text-xs text-muted-foreground truncate font-mono">{url}</p>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 opacity-60 transition-opacity duration-200 group-hover/task:opacity-100">
                     {t.enabled ? (
-                      <Button size="icon-sm" variant="ghost" title="Disable" onClick={async () => { await disableTask(t.id); load(); }}>
+                      <Button size="icon-sm" variant="ghost" title="Disable" onClick={() => act(() => disableTask(t.id), "Task disabled")}>
                         <Square className="h-4 w-4" />
                       </Button>
                     ) : (
-                      <Button size="icon-sm" variant="ghost" title="Enable" onClick={async () => { await enableTask(t.id); load(); }}>
+                      <Button size="icon-sm" variant="ghost" title="Enable" onClick={() => act(() => enableTask(t.id), "Task enabled")}>
                         <Play className="h-4 w-4" />
                       </Button>
                     )}
-                    <Button size="icon-sm" variant="ghost" title="Run Now" onClick={async () => { await runTask(t.id); load(); }}>
+                    <Button size="icon-sm" variant="ghost" title="Run Now" onClick={() => act(() => runTask(t.id), "Task triggered")}>
                       <Zap className="h-4 w-4" />
                     </Button>
                     <Button size="icon-sm" variant="ghost" title="Edit" onClick={() => openEdit(t)}>
@@ -183,10 +230,9 @@ export default function Tasks() {
                       size="icon-sm"
                       variant="ghost"
                       title="Delete"
-                      onClick={async () => {
+                      onClick={() => {
                         if (confirm("Delete this task?")) {
-                          await deleteTask(t.id);
-                          load();
+                          act(() => deleteTask(t.id), "Task deleted");
                         }
                       }}
                     >
@@ -207,14 +253,14 @@ export default function Tasks() {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            <div>
+            <div className="space-y-1.5">
               <Label>Name</Label>
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="My Task" />
             </div>
 
-            <div>
+            <div className="space-y-1.5">
               <Label>Type</Label>
-              <Tabs value={form.task_type} onValueChange={(v) => setForm({ ...form, task_type: v as "http" | "shell" })} className="mt-1">
+              <Tabs value={form.task_type} onValueChange={(v) => setForm({ ...form, task_type: v as "http" | "shell" })}>
                 <TabsList>
                   <TabsTrigger value="http">HTTP</TabsTrigger>
                   <TabsTrigger value="shell">Shell</TabsTrigger>
@@ -222,9 +268,9 @@ export default function Tasks() {
               </Tabs>
             </div>
 
-            <div>
+            <div className="space-y-1.5">
               <Label>Schedule</Label>
-              <div className="flex gap-3 mt-1">
+              <div className="flex gap-3">
                 <Select value={form.schedule_type} onValueChange={(v) => setForm({ ...form, schedule_type: v as "cron" | "once" })}>
                   <SelectTrigger className="w-40">
                     <SelectValue />
@@ -278,7 +324,7 @@ export default function Tasks() {
             {form.task_type === "http" ? (
               <>
                 <div className="flex gap-3">
-                  <div className="w-24">
+                  <div className="w-24 space-y-1.5">
                     <Label>Method</Label>
                     <Select value={form.http_method} onValueChange={(v) => setForm({ ...form, http_method: v || "GET" })}>
                       <SelectTrigger>
@@ -292,18 +338,18 @@ export default function Tasks() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 space-y-1.5">
                     <Label>URL</Label>
                     <Input value={form.http_url} onChange={(e) => setForm({ ...form, http_url: e.target.value })} placeholder="https://example.com/api" />
                   </div>
                 </div>
-                <div>
+                <div className="space-y-1.5">
                   <Label>Body (optional)</Label>
                   <Input value={form.http_body} onChange={(e) => setForm({ ...form, http_body: e.target.value })} placeholder='{"key": "value"}' />
                 </div>
               </>
             ) : (
-              <div>
+              <div className="space-y-1.5">
                 <Label>Command</Label>
                 <Input value={form.shell_cmd} onChange={(e) => setForm({ ...form, shell_cmd: e.target.value })} placeholder="echo hello" />
               </div>
@@ -311,8 +357,10 @@ export default function Tasks() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDialog(false)}>Cancel</Button>
-            <Button onClick={handleSubmit} disabled={!form.name}>{editingId ? "Update" : "Create"}</Button>
+            <Button variant="outline" onClick={() => setShowDialog(false)} disabled={submitting}>Cancel</Button>
+            <Button onClick={handleSubmit} disabled={!form.name || submitting}>
+              {submitting ? "Saving..." : editingId ? "Update" : "Create"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
