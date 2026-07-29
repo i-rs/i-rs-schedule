@@ -56,7 +56,7 @@ struct ExecQuery {
     limit: Option<u32>,
 }
 
-fn build_task(body: CreateTaskRequest) -> Task {
+fn build_task(body: CreateTaskRequest) -> Result<Task, String> {
     let task_type = match body.task_type.as_deref() {
         Some("shell") => TaskType::Shell {
             cmd: body.shell_cmd.unwrap_or_default(),
@@ -78,11 +78,13 @@ fn build_task(body: CreateTaskRequest) -> Task {
         },
     };
 
+    schedule.validate()?;
+
     let mut task = Task::new(body.name, task_type, schedule);
     if let Some(enabled) = body.enabled {
         task.enabled = enabled;
     }
-    task
+    Ok(task)
 }
 
 pub fn build_router(
@@ -105,7 +107,7 @@ pub fn build_router(
                 .body()
                 .await
                 .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
-            let task = build_task(body);
+            let task = build_task(body).map_err(|e| err_msg(400, e))?;
             db.create_task(&task)
                 .await
                 .map_err(|e| err_msg(500, format!("db error: {e}")))?;
@@ -153,7 +155,7 @@ pub fn build_router(
                 .body()
                 .await
                 .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
-            let mut task = build_task(body);
+            let mut task = build_task(body).map_err(|e| err_msg(400, e))?;
             task.id = id;
             task.updated_at = crate::db::now_iso();
             db.update_task(&task)
