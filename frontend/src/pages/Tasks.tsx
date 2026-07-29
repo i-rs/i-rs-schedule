@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, runTask, type Task } from "@/api";
+import { toast } from "@/hooks/useToast";
 import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap } from "lucide-react";
 
 interface TaskForm {
@@ -41,11 +42,17 @@ export default function Tasks() {
   const [showDialog, setShowDialog] = useState(false);
   const [form, setForm] = useState<TaskForm>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setTasks(await listTasks());
-    setLoading(false);
+    try {
+      setTasks(await listTasks());
+    } catch (e) {
+      toast.error(`Failed to load tasks: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -53,6 +60,19 @@ export default function Tasks() {
   }, [load]);
 
   const handleSubmit = async () => {
+    if (!form.name.trim()) {
+      toast.error("Name is required");
+      return;
+    }
+    if (form.schedule_type === "cron" && !form.cron_expr.trim()) {
+      toast.error("Cron expression is required");
+      return;
+    }
+    if (form.task_type === "http" && !form.http_url.trim()) {
+      toast.error("URL is required for HTTP tasks");
+      return;
+    }
+
     const payload = {
       name: form.name,
       task_type: form.task_type,
@@ -63,15 +83,24 @@ export default function Tasks() {
         : { shell_cmd: form.shell_cmd }),
     };
 
-    if (editingId) {
-      await updateTask(editingId, payload);
-    } else {
-      await createTask(payload);
+    setSubmitting(true);
+    try {
+      if (editingId) {
+        await updateTask(editingId, payload);
+        toast.success("Task updated");
+      } else {
+        await createTask(payload);
+        toast.success("Task created");
+      }
+      setShowDialog(false);
+      setForm(emptyForm);
+      setEditingId(null);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
     }
-    setShowDialog(false);
-    setForm(emptyForm);
-    setEditingId(null);
-    await load();
   };
 
   const openEdit = (t: Task) => {
@@ -94,6 +123,17 @@ export default function Tasks() {
     setEditingId(null);
     setForm(emptyForm);
     setShowDialog(true);
+  };
+
+  // 包裹列表操作:失败 toast,成功后刷新。
+  const act = async (fn: () => Promise<unknown>, successMsg?: string) => {
+    try {
+      await fn();
+      if (successMsg) toast.success(successMsg);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
   };
 
   return (
@@ -161,19 +201,19 @@ export default function Tasks() {
                         {t.schedule.type === "cron" ? t.schedule.expr : `${t.schedule.delay_secs}s`}
                       </Badge>
                     </div>
-                    <p className="text-xs text-muted-foreground truncate max-w-xl">{url}</p>
+                    <p className="text-xs text-muted-foreground truncate">{url}</p>
                   </div>
                   <div className="flex items-center gap-1">
                     {t.enabled ? (
-                      <Button size="icon-sm" variant="ghost" title="Disable" onClick={async () => { await disableTask(t.id); load(); }}>
+                      <Button size="icon-sm" variant="ghost" title="Disable" onClick={() => act(() => disableTask(t.id), "Task disabled")}>
                         <Square className="h-4 w-4" />
                       </Button>
                     ) : (
-                      <Button size="icon-sm" variant="ghost" title="Enable" onClick={async () => { await enableTask(t.id); load(); }}>
+                      <Button size="icon-sm" variant="ghost" title="Enable" onClick={() => act(() => enableTask(t.id), "Task enabled")}>
                         <Play className="h-4 w-4" />
                       </Button>
                     )}
-                    <Button size="icon-sm" variant="ghost" title="Run Now" onClick={async () => { await runTask(t.id); load(); }}>
+                    <Button size="icon-sm" variant="ghost" title="Run Now" onClick={() => act(() => runTask(t.id), "Task triggered")}>
                       <Zap className="h-4 w-4" />
                     </Button>
                     <Button size="icon-sm" variant="ghost" title="Edit" onClick={() => openEdit(t)}>
@@ -183,10 +223,9 @@ export default function Tasks() {
                       size="icon-sm"
                       variant="ghost"
                       title="Delete"
-                      onClick={async () => {
+                      onClick={() => {
                         if (confirm("Delete this task?")) {
-                          await deleteTask(t.id);
-                          load();
+                          act(() => deleteTask(t.id), "Task deleted");
                         }
                       }}
                     >
@@ -311,8 +350,10 @@ export default function Tasks() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDialog(false)}>Cancel</Button>
-            <Button onClick={handleSubmit} disabled={!form.name}>{editingId ? "Update" : "Create"}</Button>
+            <Button variant="outline" onClick={() => setShowDialog(false)} disabled={submitting}>Cancel</Button>
+            <Button onClick={handleSubmit} disabled={!form.name || submitting}>
+              {submitting ? "Saving..." : editingId ? "Update" : "Create"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
