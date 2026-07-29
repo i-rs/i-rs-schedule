@@ -1,6 +1,7 @@
 mod api;
 mod db;
 mod executor;
+mod schedule;
 mod scheduler;
 
 use db::Db;

@@ -3,6 +3,8 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+pub use crate::schedule::ScheduleConfig;
+
 /// ISO-8601 UTC 时间戳格式,与 schema 的 `datetime('now')` 默认值兼容。
 const TIMESTAMP_FMT: &str = "%Y-%m-%dT%H:%M:%S%.3fZ";
 
@@ -42,13 +44,6 @@ pub enum TaskType {
     Shell {
         cmd: String,
     },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ScheduleConfig {
-    Cron { expr: String },
-    Once { delay_secs: u64 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

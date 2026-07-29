@@ -3,7 +3,6 @@ use crate::executor::Executor;
 use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_util::time::delay_queue::{self, DelayQueue};
 use uuid::Uuid;
@@ -17,45 +16,6 @@ pub enum ControlCmd {
 pub struct Scheduler {
     queue: DelayQueue<Task>,
     keys: HashMap<String, delay_queue::Key>,
-}
-
-impl ScheduleConfig {
-    pub fn next_delay(&self) -> Duration {
-        match self {
-            ScheduleConfig::Cron { expr } => match expr.parse::<cron::Schedule>() {
-                Ok(schedule) => {
-                    let now = chrono::Utc::now();
-                    match schedule.upcoming(chrono::Utc).next() {
-                        Some(next) => {
-                            let delta = (next - now).num_milliseconds().max(0);
-                            Duration::from_millis(delta as u64)
-                        }
-                        None => Duration::from_secs(3600),
-                    }
-                }
-                Err(_) => Duration::from_secs(3600),
-            },
-            ScheduleConfig::Once { delay_secs } => Duration::from_secs(*delay_secs),
-        }
-    }
-
-    pub fn remaining_delay(&self, created_at: &str) -> Option<Duration> {
-        match self {
-            ScheduleConfig::Once { delay_secs } => match crate::db::parse_iso(created_at) {
-                Some(created) => {
-                    let now = chrono::Utc::now();
-                    let elapsed = (now - created).num_seconds().max(0) as u64;
-                    if elapsed >= *delay_secs {
-                        None
-                    } else {
-                        Some(Duration::from_secs(*delay_secs - elapsed))
-                    }
-                }
-                None => Some(Duration::from_secs(*delay_secs)),
-            },
-            ScheduleConfig::Cron { .. } => Some(self.next_delay()),
-        }
-    }
 }
 
 impl Scheduler {
