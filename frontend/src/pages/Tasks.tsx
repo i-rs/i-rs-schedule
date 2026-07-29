@@ -139,7 +139,7 @@ export default function Tasks() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold">Tasks</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Tasks</h1>
         <div className="flex gap-2">
           <Button size="icon" variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className="h-4 w-4" />
@@ -173,10 +173,11 @@ export default function Tasks() {
           ))}
         </div>
       ) : tasks.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <Inbox className="h-12 w-12 mb-3 opacity-40" />
-          <p className="text-sm">No tasks yet. Create one to start scheduling.</p>
-          <Button size="sm" onClick={openCreate} className="mt-3">
+        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+          <Inbox className="h-14 w-14 mb-4 text-primary/40" />
+          <p className="text-sm font-medium">No tasks yet</p>
+          <p className="text-xs mt-1 text-muted-foreground/70">Create one to start scheduling.</p>
+          <Button size="sm" onClick={openCreate} className="mt-4">
             <Plus className="h-4 w-4" /> Create Task
           </Button>
         </div>
@@ -186,12 +187,17 @@ export default function Tasks() {
             const url = t.task_type.type === "http" ? t.task_type.url : t.task_type.cmd;
             const TypeIcon = t.task_type.type === "http" ? Globe : Terminal;
             return (
-              <Card key={t.id} className={`border-l-4 ${t.enabled ? "border-l-emerald-500" : "border-l-muted"} hover:shadow-sm transition-shadow`}>
+              <Card
+                key={t.id}
+                className={`group/task border-l-4 shadow-[var(--shadow-card)] transition-all duration-200 hover:shadow-[var(--shadow-card-hover)] ${t.enabled ? "border-l-primary" : "border-l-muted-foreground/40"}`}
+              >
                 <CardContent className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-4 gap-3">
                   <div className="space-y-1.5 flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <TypeIcon className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="font-medium text-sm">{t.name}</span>
+                      <span className={`flex h-6 w-6 items-center justify-center rounded-md ${t.task_type.type === "http" ? "bg-primary/10 text-primary" : "bg-violet-500/10 text-violet-500"}`}>
+                        <TypeIcon className="h-3.5 w-3.5" />
+                      </span>
+                      <span className="font-medium text-[15px]">{t.name}</span>
                       <Badge variant={t.enabled ? "default" : "secondary"} className="text-[10px]">
                         {t.enabled ? "Enabled" : "Disabled"}
                       </Badge>
@@ -201,9 +207,9 @@ export default function Tasks() {
                         {t.schedule.type === "cron" ? t.schedule.expr : `${t.schedule.delay_secs}s`}
                       </Badge>
                     </div>
-                    <p className="text-xs text-muted-foreground truncate">{url}</p>
+                    <p className="text-xs text-muted-foreground truncate font-mono">{url}</p>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 opacity-60 transition-opacity duration-200 group-hover/task:opacity-100">
                     {t.enabled ? (
                       <Button size="icon-sm" variant="ghost" title="Disable" onClick={() => act(() => disableTask(t.id), "Task disabled")}>
                         <Square className="h-4 w-4" />
