@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
     let mut scheduler = Scheduler::new();
     scheduler.load_tasks(tasks);
 
-    let executor = Arc::new(Executor);
+    let executor = Arc::new(Executor::new());
     let scheduler_db = db.clone();
     let api_executor = executor.clone();
 

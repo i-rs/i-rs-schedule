@@ -1,4 +1,5 @@
 use crate::db::{Task, TaskType};
+use std::time::Duration;
 
 pub struct ExecutionResult {
     pub status: String,
@@ -6,9 +7,19 @@ pub struct ExecutionResult {
     pub http_status: Option<i64>,
 }
 
-pub struct Executor;
+pub struct Executor {
+    client: reqwest::Client,
+}
 
 impl Executor {
+    pub fn new() -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("failed to build reqwest client");
+        Self { client }
+    }
+
     pub async fn execute(&self, task: &Task) -> ExecutionResult {
         match &task.task_type {
             TaskType::Http {
@@ -16,24 +27,27 @@ impl Executor {
                 url,
                 headers,
                 body,
-            } => Self::execute_http(method, url, headers, body.as_deref()).await,
+            } => {
+                self.execute_http(method, url, headers, body.as_deref())
+                    .await
+            }
             TaskType::Shell { cmd } => Self::execute_shell(cmd).await,
         }
     }
 
     async fn execute_http(
+        &self,
         method: &str,
         url: &str,
         headers: &Option<serde_json::Value>,
         body: Option<&str>,
     ) -> ExecutionResult {
-        let client = reqwest::Client::new();
         let mut req = match method.to_uppercase().as_str() {
-            "GET" => client.get(url),
-            "POST" => client.post(url),
-            "PUT" => client.put(url),
-            "DELETE" => client.delete(url),
-            _ => client.get(url),
+            "GET" => self.client.get(url),
+            "POST" => self.client.post(url),
+            "PUT" => self.client.put(url),
+            "DELETE" => self.client.delete(url),
+            _ => self.client.get(url),
         };
 
         if let Some(serde_json::Value::Object(map)) = headers {
