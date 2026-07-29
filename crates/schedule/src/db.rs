@@ -317,8 +317,8 @@ impl Db {
     pub async fn update_task(&self, task: &Task) -> anyhow::Result<()> {
         let pool = self.pool.clone();
         let task = task.clone();
+        let now = now_iso();
         spawn_db(pool, move |conn| {
-            let now = now_iso();
             let (schedule_type, cron_expr, delay_secs) = match &task.schedule {
                 ScheduleConfig::Cron { expr } => ("cron", Some(expr.as_str()), None),
                 ScheduleConfig::Once { delay_secs } => ("once", None, Some(*delay_secs as i64)),

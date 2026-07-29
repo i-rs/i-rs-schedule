@@ -42,13 +42,9 @@ impl Executor {
         headers: &Option<serde_json::Value>,
         body: Option<&str>,
     ) -> ExecutionResult {
-        let mut req = match method.to_uppercase().as_str() {
-            "GET" => self.client.get(url),
-            "POST" => self.client.post(url),
-            "PUT" => self.client.put(url),
-            "DELETE" => self.client.delete(url),
-            _ => self.client.get(url),
-        };
+        let method = reqwest::Method::from_bytes(method.to_uppercase().as_bytes())
+            .unwrap_or(reqwest::Method::GET);
+        let mut req = self.client.request(method, url);
 
         if let Some(serde_json::Value::Object(map)) = headers {
             for (k, v) in map {
