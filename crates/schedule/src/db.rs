@@ -177,6 +177,7 @@ impl Db {
             .context("build sqlite pool")?;
         let db = Self { pool };
         db.init_schema()?;
+        db.cleanup_stale_running()?;
         Ok(db)
     }
 
@@ -214,6 +215,24 @@ impl Db {
             ",
         )
         .context("init sqlite schema")?;
+        Ok(())
+    }
+
+    /// 将上次进程残留的 `status='running'` 执行记录标记为 `interrupted`。
+    /// 进程崩溃/被杀后这些记录会永远停在 running;启动时修复以保证可观察性。
+    fn cleanup_stale_running(&self) -> anyhow::Result<()> {
+        let conn = self.pool.get()?;
+        let now = now_iso();
+        let affected = conn.execute(
+            "UPDATE task_executions SET status = ?1, finished_at = ?2 WHERE status = 'running'",
+            params!["interrupted", now],
+        )?;
+        if affected > 0 {
+            tracing::info!(
+                affected,
+                "marked stale running executions as interrupted on startup"
+            );
+        }
         Ok(())
     }
 
