@@ -1,4 +1,4 @@
-use crate::db::{Db, ScheduleConfig, Task, TaskExecution, TaskType};
+use crate::db::{Db, ScheduleConfig, Task, TaskType};
 use crate::executor::Executor;
 use crate::scheduler::ControlCmd;
 use desirable::{Request, Response, Router};
@@ -13,6 +13,9 @@ struct ApiResponse {
     data: serde_json::Value,
 }
 
+// Response 的 Err 变体较大(由 desirable 框架定义,无法瘦身);
+// boxing 会改变返回类型引发连锁,故 allow 掉 result_large_err。
+#[allow(clippy::result_large_err)]
 fn ok<T: Serialize>(data: T) -> Result<Response, Response> {
     let body = ApiResponse {
         code: 0,
@@ -22,17 +25,13 @@ fn ok<T: Serialize>(data: T) -> Result<Response, Response> {
     Ok(Response::json(body))
 }
 
-fn err(status: u16, msg: String) -> Response {
+fn err_msg(status: u16, msg: impl Into<String>) -> Response {
     let body = ApiResponse {
         code: status,
-        message: msg,
+        message: msg.into(),
         data: serde_json::Value::Null,
     };
     Response::with_status(status, serde_json::to_string(&body).unwrap()).unwrap()
-}
-
-fn err_msg(status: u16, msg: impl Into<String>) -> Response {
-    err(status, msg.into())
 }
 
 #[derive(Deserialize)]
@@ -56,7 +55,7 @@ struct ExecQuery {
     limit: Option<u32>,
 }
 
-fn build_task(body: CreateTaskRequest) -> Task {
+fn build_task(body: CreateTaskRequest) -> Result<Task, String> {
     let task_type = match body.task_type.as_deref() {
         Some("shell") => TaskType::Shell {
             cmd: body.shell_cmd.unwrap_or_default(),
@@ -78,11 +77,13 @@ fn build_task(body: CreateTaskRequest) -> Task {
         },
     };
 
+    schedule.validate()?;
+
     let mut task = Task::new(body.name, task_type, schedule);
     if let Some(enabled) = body.enabled {
         task.enabled = enabled;
     }
-    task
+    Ok(task)
 }
 
 pub fn build_router(
@@ -105,7 +106,7 @@ pub fn build_router(
                 .body()
                 .await
                 .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
-            let task = build_task(body);
+            let task = build_task(body).map_err(|e| err_msg(400, e))?;
             db.create_task(&task)
                 .await
                 .map_err(|e| err_msg(500, format!("db error: {e}")))?;
@@ -153,7 +154,7 @@ pub fn build_router(
                 .body()
                 .await
                 .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
-            let mut task = build_task(body);
+            let mut task = build_task(body).map_err(|e| err_msg(400, e))?;
             task.id = id;
             task.updated_at = crate::db::now_iso();
             db.update_task(&task)
@@ -241,32 +242,7 @@ pub fn build_router(
                 .map_err(|e| err_msg(500, format!("db error: {e}")))?
                 .ok_or_else(|| err_msg(404, "not found"))?;
 
-            let exec_id = uuid::Uuid::new_v4().to_string();
-            let started_at = chrono::Utc::now()
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string();
-            let _ = db
-                .create_execution(&TaskExecution {
-                    id: exec_id.clone(),
-                    task_id: task.id.clone(),
-                    status: "running".to_string(),
-                    output: None,
-                    http_status: None,
-                    started_at: started_at.clone(),
-                    finished_at: None,
-                })
-                .await;
-
-            let result = exec.execute(&task).await;
-            let _ = db
-                .update_execution(&exec_id, &result.status, &result.output, result.http_status)
-                .await;
-
-            let exec_record = db
-                .get_execution(&exec_id)
-                .await
-                .map_err(|e| err_msg(500, format!("db error: {e}")))?
-                .unwrap();
+            let exec_record = exec.execute_and_record(&db, &task).await;
             ok(exec_record)
         }
     });

@@ -1,4 +1,4 @@
-use crate::db::{Db, ScheduleConfig, Task, TaskExecution};
+use crate::db::{Db, ScheduleConfig, Task};
 use crate::executor::Executor;
 use futures_util::StreamExt;
 use std::collections::HashMap;
@@ -6,56 +6,18 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_util::time::delay_queue::{self, DelayQueue};
-use uuid::Uuid;
 
 pub enum ControlCmd {
     Add(Task),
     Remove(String),
     Update(Task),
+    Shutdown,
 }
 
 pub struct Scheduler {
     queue: DelayQueue<Task>,
     keys: HashMap<String, delay_queue::Key>,
-}
-
-impl ScheduleConfig {
-    pub fn next_delay(&self) -> Duration {
-        match self {
-            ScheduleConfig::Cron { expr } => match expr.parse::<cron::Schedule>() {
-                Ok(schedule) => {
-                    let now = chrono::Utc::now();
-                    match schedule.upcoming(chrono::Utc).next() {
-                        Some(next) => {
-                            let delta = (next - now).num_milliseconds().max(0);
-                            Duration::from_millis(delta as u64)
-                        }
-                        None => Duration::from_secs(3600),
-                    }
-                }
-                Err(_) => Duration::from_secs(3600),
-            },
-            ScheduleConfig::Once { delay_secs } => Duration::from_secs(*delay_secs),
-        }
-    }
-
-    pub fn remaining_delay(&self, created_at: &str) -> Option<Duration> {
-        match self {
-            ScheduleConfig::Once { delay_secs } => match crate::db::parse_iso(created_at) {
-                Some(created) => {
-                    let now = chrono::Utc::now();
-                    let elapsed = (now - created).num_seconds().max(0) as u64;
-                    if elapsed >= *delay_secs {
-                        None
-                    } else {
-                        Some(Duration::from_secs(*delay_secs - elapsed))
-                    }
-                }
-                None => Some(Duration::from_secs(*delay_secs)),
-            },
-            ScheduleConfig::Cron { .. } => Some(self.next_delay()),
-        }
-    }
+    join_set: tokio::task::JoinSet<()>,
 }
 
 impl Scheduler {
@@ -63,6 +25,7 @@ impl Scheduler {
         Self {
             queue: DelayQueue::new(),
             keys: HashMap::new(),
+            join_set: tokio::task::JoinSet::new(),
         }
     }
 
@@ -131,63 +94,8 @@ impl Scheduler {
                     let db = db.clone();
                     let task_clone = task.clone();
 
-                    tokio::spawn(async move {
-                        let exec_id = Uuid::new_v4().to_string();
-                        let started_at = crate::db::now_iso();
-                        let start = std::time::Instant::now();
-
-                        if let Err(e) = db
-                            .create_execution(&TaskExecution {
-                                id: exec_id.clone(),
-                                task_id: task_clone.id.clone(),
-                                status: "running".to_string(),
-                                output: None,
-                                http_status: None,
-                                started_at,
-                                finished_at: None,
-                            })
-                            .await
-                        {
-                            tracing::warn!(
-                                error = %e,
-                                task_id = %task_clone.id,
-                                "create execution failed; skipping run"
-                            );
-                            return;
-                        }
-
-                        tracing::info!(
-                            task_id = %task_clone.id,
-                            exec_id = %exec_id,
-                            "execution started"
-                        );
-
-                        let result = exec.execute(&task_clone).await;
-
-                        if let Err(e) = db
-                            .update_execution(
-                                &exec_id,
-                                &result.status,
-                                &result.output,
-                                result.http_status,
-                            )
-                            .await
-                        {
-                            tracing::warn!(
-                                error = %e,
-                                task_id = %task_clone.id,
-                                exec_id = %exec_id,
-                                "update execution failed"
-                            );
-                        }
-
-                        tracing::info!(
-                            task_id = %task_clone.id,
-                            exec_id = %exec_id,
-                            status = %result.status,
-                            duration_ms = start.elapsed().as_millis() as u64,
-                            "execution finished"
-                        );
+                    self.join_set.spawn(async move {
+                        let _ = exec.execute_and_record(&db, &task_clone).await;
                     });
                 }
 
@@ -205,9 +113,27 @@ impl Scheduler {
                             tracing::debug!(task_id = %task.id, "scheduler update");
                             self.update(task);
                         }
+                        ControlCmd::Shutdown => {
+                            tracing::info!(
+                                "scheduler shutdown requested; draining in-flight executions"
+                            );
+                            break;
+                        }
                     }
                 }
             }
         }
+
+        // 收到 Shutdown 后,等待在途 execution 完成(HTTP/shell 各自有超时,
+        // 这里再加一个总 timeout 兜底,避免某个卡死的 task 拖住退出)。
+        let drain = async { while self.join_set.join_next().await.is_some() {} };
+        if tokio::time::timeout(Duration::from_secs(35), drain)
+            .await
+            .is_err()
+        {
+            tracing::warn!("shutdown drain timed out after 35s; aborting remaining tasks");
+            self.join_set.abort_all();
+        }
+        tracing::info!("scheduler stopped");
     }
 }
