@@ -125,6 +125,12 @@ struct CreateTaskBody {
     shell_cmd: Option<String>,
 }
 
+async fn print_response(resp: reqwest::Response) -> Result<()> {
+    let val: serde_json::Value = resp.json().await?;
+    println!("{}", serde_json::to_string_pretty(&val)?);
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -164,23 +170,19 @@ async fn main() -> Result<()> {
                     .await
                     .context("failed to create task")?;
 
-                let task: serde_json::Value = resp.json().await?;
-                println!("{}", serde_json::to_string_pretty(&task)?);
+                print_response(resp).await?;
             }
             TaskCmd::List(args) => {
                 let url = format!("{base}/api/tasks");
                 let resp = client.get(&url).send().await?;
                 let tasks: Vec<serde_json::Value> = resp.json().await?;
-
-                let filtered: Vec<&serde_json::Value> = if let Some(enabled) = args.enabled {
-                    tasks
+                let filtered: Vec<&serde_json::Value> = match args.enabled {
+                    Some(enabled) => tasks
                         .iter()
                         .filter(|t| t["enabled"].as_bool() == Some(enabled))
-                        .collect()
-                } else {
-                    tasks.iter().collect()
+                        .collect(),
+                    None => tasks.iter().collect(),
                 };
-
                 println!("{}", serde_json::to_string_pretty(&filtered)?);
             }
             TaskCmd::Show(args) => {
@@ -188,32 +190,28 @@ async fn main() -> Result<()> {
                     .get(format!("{base}/api/tasks/{}", args.id))
                     .send()
                     .await?;
-                let task: serde_json::Value = resp.json().await?;
-                println!("{}", serde_json::to_string_pretty(&task)?);
+                print_response(resp).await?;
             }
             TaskCmd::Rm(args) => {
                 let resp = client
                     .delete(format!("{base}/api/tasks/{}", args.id))
                     .send()
                     .await?;
-                let result: serde_json::Value = resp.json().await?;
-                println!("{}", serde_json::to_string_pretty(&result)?);
+                print_response(resp).await?;
             }
             TaskCmd::Enable(args) => {
                 let resp = client
                     .post(format!("{base}/api/tasks/{}/enable", args.id))
                     .send()
                     .await?;
-                let result: serde_json::Value = resp.json().await?;
-                println!("{}", serde_json::to_string_pretty(&result)?);
+                print_response(resp).await?;
             }
             TaskCmd::Disable(args) => {
                 let resp = client
                     .post(format!("{base}/api/tasks/{}/disable", args.id))
                     .send()
                     .await?;
-                let result: serde_json::Value = resp.json().await?;
-                println!("{}", serde_json::to_string_pretty(&result)?);
+                print_response(resp).await?;
             }
         },
         Command::Exec(cmd) => match cmd {
@@ -223,16 +221,14 @@ async fn main() -> Result<()> {
                     url.push_str(&format!("&task_id={tid}"));
                 }
                 let resp = client.get(&url).send().await?;
-                let execs: Vec<serde_json::Value> = resp.json().await?;
-                println!("{}", serde_json::to_string_pretty(&execs)?);
+                print_response(resp).await?;
             }
             ExecCmd::Show(args) => {
                 let resp = client
                     .get(format!("{base}/api/executions/{}", args.id))
                     .send()
                     .await?;
-                let exec: serde_json::Value = resp.json().await?;
-                println!("{}", serde_json::to_string_pretty(&exec)?);
+                print_response(resp).await?;
             }
         },
     }

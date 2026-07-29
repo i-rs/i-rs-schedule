@@ -47,6 +47,7 @@ struct CreateTaskRequest {
     http_headers: Option<serde_json::Value>,
     http_body: Option<String>,
     shell_cmd: Option<String>,
+    enabled: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -77,46 +78,18 @@ fn build_task(body: CreateTaskRequest) -> Task {
         },
     };
 
-    Task::new(body.name, task_type, schedule)
-}
-
-fn build_update_task(id: String, body: CreateTaskRequest) -> Task {
-    let task_type = match body.task_type.as_deref() {
-        Some("shell") => TaskType::Shell {
-            cmd: body.shell_cmd.unwrap_or_default(),
-        },
-        _ => TaskType::Http {
-            method: body.http_method.unwrap_or_else(|| "GET".into()),
-            url: body.http_url.unwrap_or_default(),
-            headers: body.http_headers,
-            body: body.http_body,
-        },
-    };
-
-    let schedule = match body.schedule_type.as_deref() {
-        Some("once") => ScheduleConfig::Once {
-            delay_secs: body.delay_secs.unwrap_or(0),
-        },
-        _ => ScheduleConfig::Cron {
-            expr: body.cron_expr.unwrap_or_default(),
-        },
-    };
-
-    let now = chrono::Utc::now()
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-        .to_string();
-    Task {
-        id,
-        name: body.name,
-        task_type,
-        enabled: true,
-        schedule,
-        created_at: now.clone(),
-        updated_at: now,
+    let mut task = Task::new(body.name, task_type, schedule);
+    if let Some(enabled) = body.enabled {
+        task.enabled = enabled;
     }
+    task
 }
 
-pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor: Arc<Executor>) -> Router {
+pub fn build_router(
+    db: Db,
+    cmd_tx: mpsc::UnboundedSender<ControlCmd>,
+    executor: Arc<Executor>,
+) -> Router {
     let db = Arc::new(db);
     let cmd_tx = Arc::new(cmd_tx);
 
@@ -157,9 +130,7 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor:
     router.get("/api/tasks/:id", move |req: Request| {
         let db = db_get_one.clone();
         async move {
-            let id: String = req
-                .param("id")
-                .map_err(|_| err_msg(400, "missing id"))?;
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             match db
                 .get_task(&id)
                 .await
@@ -177,14 +148,14 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor:
         let db = db_update.clone();
         let tx = tx_update.clone();
         async move {
-            let id: String = req
-                .param("id")
-                .map_err(|_| err_msg(400, "missing id"))?;
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             let body: CreateTaskRequest = req
                 .body()
                 .await
                 .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
-            let task = build_update_task(id, body);
+            let mut task = build_task(body);
+            task.id = id;
+            task.updated_at = crate::db::now_iso();
             db.update_task(&task)
                 .await
                 .map_err(|e| err_msg(500, format!("db error: {e}")))?;
@@ -199,9 +170,7 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor:
         let db = db_delete.clone();
         let tx = tx_delete.clone();
         async move {
-            let id: String = req
-                .param("id")
-                .map_err(|_| err_msg(400, "missing id"))?;
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             match db
                 .delete_task(&id)
                 .await
@@ -222,9 +191,7 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor:
         let db = db_enable.clone();
         let tx = tx_enable.clone();
         async move {
-            let id: String = req
-                .param("id")
-                .map_err(|_| err_msg(400, "missing id"))?;
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             match db
                 .set_enabled(&id, true)
                 .await
@@ -247,9 +214,7 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor:
         let db = db_disable.clone();
         let tx = tx_disable.clone();
         async move {
-            let id: String = req
-                .param("id")
-                .map_err(|_| err_msg(400, "missing id"))?;
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             match db
                 .set_enabled(&id, false)
                 .await
@@ -269,9 +234,7 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor:
         let db = db_run.clone();
         let exec = executor.clone();
         async move {
-            let id: String = req
-                .param("id")
-                .map_err(|_| err_msg(400, "missing id"))?;
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             let task = db
                 .get_task(&id)
                 .await
@@ -329,9 +292,7 @@ pub fn build_router(db: Db, cmd_tx: mpsc::UnboundedSender<ControlCmd>, executor:
     router.get("/api/executions/:id", move |req: Request| {
         let db = db_exec_one.clone();
         async move {
-            let id: String = req
-                .param("id")
-                .map_err(|_| err_msg(400, "missing id"))?;
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             match db
                 .get_execution(&id)
                 .await
