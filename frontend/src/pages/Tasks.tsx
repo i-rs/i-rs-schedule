@@ -27,6 +27,7 @@ interface TaskForm {
   shell_cmd: string;
   timezone: string;
   timeout_secs: string;
+  max_retries: string;
   notify_type: "none" | "webhook" | "feishu" | "dingtalk";
   notify_url: string;
 }
@@ -43,6 +44,7 @@ const emptyForm: TaskForm = {
   shell_cmd: "",
   timezone: "UTC",
   timeout_secs: "30",
+  max_retries: "0",
   notify_type: "none",
   notify_url: "",
 };
@@ -99,6 +101,7 @@ export default function Tasks() {
         : { shell_cmd: form.shell_cmd }),
       timezone: form.timezone,
       timeout_secs: parseInt(form.timeout_secs) || 30,
+      max_retries: parseInt(form.max_retries) || 0,
       notify_type: form.notify_type,
       ...(form.notify_type !== "none" ? { notify_url: form.notify_url } : {}),
     };
@@ -137,6 +140,7 @@ export default function Tasks() {
       shell_cmd: t.task_type.type === "shell" ? t.task_type.cmd : "",
       timezone: t.timezone || "UTC",
       timeout_secs: (t.timeout_secs ?? 30).toString(),
+      max_retries: (t.max_retries ?? 0).toString(),
       notify_type: (t.notify_type as TaskForm["notify_type"]) || "none",
       notify_url: t.notify_url ?? "",
     });
@@ -377,6 +381,15 @@ export default function Tasks() {
                           type="number"
                           value={form.timeout_secs}
                           onChange={(e) => setForm({ ...form, timeout_secs: e.target.value })}
+                          className="w-24 h-7 text-xs"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Label className="text-xs text-muted-foreground">Retries</Label>
+                        <Input
+                          type="number"
+                          value={form.max_retries}
+                          onChange={(e) => setForm({ ...form, max_retries: e.target.value })}
                           className="w-24 h-7 text-xs"
                         />
                       </div>

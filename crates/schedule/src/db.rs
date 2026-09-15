@@ -30,6 +30,7 @@ pub struct Task {
     pub schedule: ScheduleConfig,
     pub timezone: String,
     pub timeout_secs: u64,
+    pub max_retries: i64,
     #[serde(rename = "notify_type")]
     pub notify_type: String,
     #[serde(default)]
@@ -56,6 +57,7 @@ pub enum TaskType {
 pub struct TaskExecution {
     pub id: String,
     pub task_id: String,
+    pub attempt: i64,
     pub status: String,
     pub output: Option<String>,
     pub http_status: Option<i64>,
@@ -74,6 +76,7 @@ impl Task {
             schedule,
             timezone: "UTC".to_string(),
             timeout_secs: 30,
+            max_retries: 0,
             notify_type: "none".to_string(),
             notify_url: String::new(),
             created_at: now.clone(),
@@ -130,6 +133,7 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     let updated_at: String = row.get("updated_at")?;
     let timezone: String = row.get("timezone")?;
     let timeout_secs: u64 = row.get::<_, i64>("timeout_secs")? as u64;
+    let max_retries: i64 = row.get("max_retries")?;
     let notify_type: String = row.get("notify_type")?;
     let notify_url: String = row.get("notify_url")?;
 
@@ -162,6 +166,7 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         schedule,
         timezone,
         timeout_secs,
+        max_retries,
         notify_type,
         notify_url,
         created_at,
@@ -173,6 +178,7 @@ fn row_to_execution(row: &rusqlite::Row) -> rusqlite::Result<TaskExecution> {
     Ok(TaskExecution {
         id: row.get("id")?,
         task_id: row.get("task_id")?,
+        attempt: row.get("attempt")?,
         status: row.get("status")?,
         output: row.get("output")?,
         http_status: row.get("http_status")?,
@@ -218,6 +224,7 @@ impl Db {
                 shell_cmd   TEXT,
                 timezone    TEXT NOT NULL DEFAULT 'UTC',
                 timeout_secs INTEGER NOT NULL DEFAULT 30,
+                max_retries INTEGER NOT NULL DEFAULT 0,
                 notify_type TEXT NOT NULL DEFAULT 'none',
                 notify_url  TEXT NOT NULL DEFAULT '',
                 created_at  TEXT NOT NULL DEFAULT (datetime('now')),
@@ -228,6 +235,7 @@ impl Db {
                 id          TEXT PRIMARY KEY,
                 task_id     TEXT NOT NULL,
                 status      TEXT NOT NULL,
+                attempt     INTEGER NOT NULL DEFAULT 0,
                 output      TEXT,
                 http_status INTEGER,
                 started_at  TEXT NOT NULL DEFAULT (datetime('now')),
@@ -241,6 +249,7 @@ impl Db {
         )
         .context("init sqlite schema")?;
         self.migrate_schema(&conn)?;
+        self.migrate_executions_schema(&conn)?;
         Ok(())
     }
 
@@ -265,6 +274,13 @@ impl Db {
             )?;
             tracing::info!("migrated tasks table: added timeout_secs");
         }
+        if !existing.iter().any(|c| c == "max_retries") {
+            conn.execute(
+                "ALTER TABLE tasks ADD COLUMN max_retries INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+            tracing::info!("migrated tasks table: added max_retries");
+        }
         if !existing.iter().any(|c| c == "notify_type") {
             conn.execute(
                 "ALTER TABLE tasks ADD COLUMN notify_type TEXT NOT NULL DEFAULT 'none'",
@@ -278,6 +294,23 @@ impl Db {
                 [],
             )?;
             tracing::info!("migrated tasks table: added notify_url");
+        }
+        Ok(())
+    }
+
+    /// `task_executions` 补列(attempt)。
+    fn migrate_executions_schema(&self, conn: &Connection) -> anyhow::Result<()> {
+        let existing: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(task_executions)")?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        if !existing.iter().any(|c| c == "attempt") {
+            conn.execute(
+                "ALTER TABLE task_executions ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+            tracing::info!("migrated task_executions table: added attempt");
         }
         Ok(())
     }
@@ -335,8 +368,8 @@ impl Db {
             conn.execute(
                 "INSERT INTO tasks (id, name, task_type, enabled, schedule_type, cron_expr, delay_secs,
                  http_method, http_url, http_headers, http_body, shell_cmd, timezone, timeout_secs,
-                 notify_type, notify_url, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                 max_retries, notify_type, notify_url, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
                 params![
                     task.id,
                     task.name,
@@ -352,6 +385,7 @@ impl Db {
                     cmd.unwrap_or(""),
                     task.timezone,
                     task.timeout_secs as i64,
+                    task.max_retries,
                     task.notify_type,
                     task.notify_url,
                     task.created_at,
@@ -433,8 +467,8 @@ impl Db {
             conn.execute(
                 "UPDATE tasks SET name=?1, task_type=?2, enabled=?3, schedule_type=?4, cron_expr=?5,
                  delay_secs=?6, http_method=?7, http_url=?8, http_headers=?9, http_body=?10,
-                 shell_cmd=?11, timezone=?12, timeout_secs=?13, notify_type=?14, notify_url=?15,
-                 updated_at=?16 WHERE id=?17",
+                 shell_cmd=?11, timezone=?12, timeout_secs=?13, max_retries=?14, notify_type=?15,
+                 notify_url=?16, updated_at=?17 WHERE id=?18",
                 params![
                     task.name,
                     task_type_str,
@@ -449,6 +483,7 @@ impl Db {
                     cmd.unwrap_or(""),
                     task.timezone,
                     task.timeout_secs as i64,
+                    task.max_retries,
                     task.notify_type,
                     task.notify_url,
                     now,
@@ -496,11 +531,12 @@ impl Db {
         let exec = exec.clone();
         spawn_db(pool, move |conn| {
             conn.execute(
-                "INSERT INTO task_executions (id, task_id, status, output, http_status, started_at, finished_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO task_executions (id, task_id, attempt, status, output, http_status, started_at, finished_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     exec.id,
                     exec.task_id,
+                    exec.attempt,
                     exec.status,
                     exec.output,
                     exec.http_status,
