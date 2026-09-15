@@ -13,6 +13,19 @@ struct ApiResponse {
     data: serde_json::Value,
 }
 
+/// API 响应的 Task 包装:附带 next_run_at 计算字段。
+#[derive(Serialize)]
+struct TaskWithNext {
+    #[serde(flatten)]
+    task: Task,
+    next_run_at: Option<String>,
+}
+
+fn with_next(task: Task) -> TaskWithNext {
+    let next_run_at = crate::schedule::next_run_at(&task);
+    TaskWithNext { task, next_run_at }
+}
+
 // Response 的 Err 变体较大(由 desirable 框架定义,无法瘦身);
 // boxing 会改变返回类型引发连锁,故 allow 掉 result_large_err。
 #[allow(clippy::result_large_err)]
@@ -47,6 +60,7 @@ struct CreateTaskRequest {
     http_body: Option<String>,
     shell_cmd: Option<String>,
     enabled: Option<bool>,
+    timezone: Option<String>,
     notify_type: Option<String>,
     notify_url: Option<String>,
 }
@@ -81,6 +95,9 @@ fn build_task(body: CreateTaskRequest) -> Result<Task, String> {
 
     schedule.validate()?;
 
+    let timezone = body.timezone.unwrap_or_else(|| "UTC".into());
+    crate::schedule::validate_timezone(&timezone)?;
+
     let notify_type = body.notify_type.unwrap_or_else(|| "none".into());
     let notify_url = body.notify_url.unwrap_or_default();
     match notify_type.as_str() {
@@ -101,6 +118,7 @@ fn build_task(body: CreateTaskRequest) -> Result<Task, String> {
     }
     task.notify_type = notify_type;
     task.notify_url = notify_url;
+    task.timezone = timezone;
     Ok(task)
 }
 
@@ -152,7 +170,7 @@ pub fn build_router(
                 .await
                 .map_err(|e| err_msg(500, format!("db error: {e}")))?;
             let _ = tx.send(ControlCmd::Add(task.clone()));
-            ok(task)
+            ok(with_next(task))
         }
     });
 
@@ -163,7 +181,10 @@ pub fn build_router(
             let tasks = db
                 .list_all_tasks()
                 .await
-                .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?
+                .into_iter()
+                .map(with_next)
+                .collect::<Vec<_>>();
             ok(tasks)
         }
     });
@@ -178,7 +199,7 @@ pub fn build_router(
                 .await
                 .map_err(|e| err_msg(500, format!("db error: {e}")))?
             {
-                Some(task) => ok(task),
+                Some(task) => ok(with_next(task)),
                 None => Err(err_msg(404, "not found")),
             }
         }
@@ -202,7 +223,7 @@ pub fn build_router(
                 .await
                 .map_err(|e| err_msg(500, format!("db error: {e}")))?;
             let _ = tx.send(ControlCmd::Update(task.clone()));
-            ok(task)
+            ok(with_next(task))
         }
     });
 

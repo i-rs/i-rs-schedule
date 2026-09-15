@@ -1,3 +1,5 @@
+use crate::db::Task;
+use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -8,18 +10,35 @@ pub enum ScheduleConfig {
     Once { delay_secs: u64 },
 }
 
+/// 解析 IANA 时区;无效值回退 UTC 并告警(防御绕过校验的写入)。
+pub fn parse_timezone(s: &str) -> Tz {
+    s.parse::<Tz>().unwrap_or_else(|_| {
+        tracing::warn!(timezone = %s, "invalid timezone; falling back to UTC");
+        chrono_tz::UTC
+    })
+}
+
+/// 创建/更新时校验时区字符串。
+pub fn validate_timezone(s: &str) -> Result<(), String> {
+    s.parse::<Tz>()
+        .map(|_| ())
+        .map_err(|e| format!("invalid timezone {s:?}: {e}"))
+}
+
 impl ScheduleConfig {
-    /// 计算到下一次触发的时间间隔。
+    /// 计算到下一次触发的时间间隔(按任务时区)。
     ///
     /// cron 解析失败时回退到 1 小时并打 warn(防御 db 被直接写入绕过创建校验)。
-    pub fn next_delay(&self) -> Duration {
+    pub fn next_delay(&self, tz: Tz) -> Duration {
         match self {
             ScheduleConfig::Cron { expr } => match expr.parse::<cron::Schedule>() {
                 Ok(schedule) => {
                     let now = chrono::Utc::now();
-                    match schedule.upcoming(chrono::Utc).next() {
+                    match schedule.upcoming(tz).next() {
                         Some(next) => {
-                            let delta = (next - now).num_milliseconds().max(0);
+                            let delta = (next.with_timezone(&chrono::Utc) - now)
+                                .num_milliseconds()
+                                .max(0);
                             Duration::from_millis(delta as u64)
                         }
                         None => {
@@ -41,7 +60,7 @@ impl ScheduleConfig {
     }
 
     /// 启动加载时,根据任务创建时间计算剩余延迟;已过期则返回 None。
-    pub fn remaining_delay(&self, created_at: &str) -> Option<Duration> {
+    pub fn remaining_delay(&self, created_at: &str, tz: Tz) -> Option<Duration> {
         match self {
             ScheduleConfig::Once { delay_secs } => match crate::db::parse_iso(created_at) {
                 Some(created) => {
@@ -55,7 +74,7 @@ impl ScheduleConfig {
                 }
                 None => Some(Duration::from_secs(*delay_secs)),
             },
-            ScheduleConfig::Cron { .. } => Some(self.next_delay()),
+            ScheduleConfig::Cron { .. } => Some(self.next_delay(tz)),
         }
     }
 
@@ -67,6 +86,32 @@ impl ScheduleConfig {
                 Err(e) => Err(format!("invalid cron expr {expr:?}: {e}")),
             },
             ScheduleConfig::Once { .. } => Ok(()),
+        }
+    }
+}
+
+/// 计算任务的下一次执行时间(UTC ISO 字符串);disabled / 已过期 once 返回 None。
+pub fn next_run_at(task: &Task) -> Option<String> {
+    if !task.enabled {
+        return None;
+    }
+    let tz = parse_timezone(&task.timezone);
+    match &task.schedule {
+        ScheduleConfig::Cron { expr } => {
+            let schedule = expr.parse::<cron::Schedule>().ok()?;
+            schedule.upcoming(tz).next().map(|t| {
+                t.with_timezone(&chrono::Utc)
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+            })
+        }
+        ScheduleConfig::Once { delay_secs } => {
+            let created = crate::db::parse_iso(&task.created_at)?;
+            let fire_at = created + chrono::Duration::seconds(*delay_secs as i64);
+            if fire_at > chrono::Utc::now() {
+                Some(fire_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+            } else {
+                None
+            }
         }
     }
 }
