@@ -6,6 +6,7 @@ const Executions = lazy(() => import("@/pages/Executions"));
 import { LayoutDashboard, ListTodo, ScrollText, Sun, Moon, RefreshCw } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { AuthDialog } from "@/components/AuthDialog";
 import { SidebarProvider, Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -114,6 +115,7 @@ function App() {
   return (
     <TooltipProvider>
       <ToastContainer />
+      <AuthDialog />
       <BrowserRouter>
         <DocumentTitle />
         <SidebarProvider defaultOpen>

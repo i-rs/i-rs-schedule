@@ -26,12 +26,30 @@ interface ApiEnvelope<T> {
   data: T;
 }
 
+export function getToken(): string | null {
+  return localStorage.getItem("schedule_token");
+}
+
+export function setToken(token: string) {
+  if (token) localStorage.setItem("schedule_token", token);
+  else localStorage.removeItem("schedule_token");
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const token = getToken();
   const resp = await fetch(url, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options?.headers,
+    },
     ...options,
   });
   const body: ApiEnvelope<T> = await resp.json();
+  if (body.code === 401) {
+    window.dispatchEvent(new CustomEvent("auth-required"));
+    throw new Error("Unauthorized");
+  }
   if (body.code !== 0) {
     throw new Error(body.message);
   }
