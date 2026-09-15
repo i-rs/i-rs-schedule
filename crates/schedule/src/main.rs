@@ -20,6 +20,23 @@ async fn main() -> anyhow::Result<()> {
 
     let db = Db::new(&db_path)?;
 
+    // 执行记录保留策略:RETENTION_DAYS 天(默认 30),0 = 永久保留。
+    let retention_days: i64 = std::env::var("RETENTION_DAYS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30);
+    if retention_days > 0 {
+        run_retention(&db, retention_days).await;
+        let retention_db = db.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 3600));
+            loop {
+                interval.tick().await;
+                run_retention(&retention_db, retention_days).await;
+            }
+        });
+    }
+
     let tasks = db.list_enabled_tasks().await?;
     tracing::info!("loaded {} enabled tasks from db", tasks.len());
 
@@ -51,4 +68,19 @@ async fn main() -> anyhow::Result<()> {
     let _ = scheduler_handle.await;
 
     Ok(())
+}
+
+/// 删除超过保留期的执行记录并记日志。
+async fn run_retention(db: &Db, retention_days: i64) {
+    let cutoff = (chrono::Utc::now() - chrono::Duration::days(retention_days))
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string();
+    match db.purge_executions_older_than(cutoff).await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(
+            deleted = n,
+            "purged executions older than {retention_days} days"
+        ),
+        Err(e) => tracing::warn!(error = %e, "retention purge failed"),
+    }
 }

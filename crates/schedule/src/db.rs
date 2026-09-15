@@ -571,4 +571,17 @@ impl Db {
         })
         .await
     }
+
+    /// 删除早于 cutoff 的执行记录,返回删除行数。
+    pub async fn purge_executions_older_than(&self, cutoff_iso: String) -> anyhow::Result<u64> {
+        let pool = self.pool.clone();
+        spawn_db(pool, move |conn| {
+            let affected = conn.execute(
+                "DELETE FROM task_executions WHERE started_at < ?1",
+                params![cutoff_iso],
+            )?;
+            Ok(affected as u64)
+        })
+        .await
+    }
 }
