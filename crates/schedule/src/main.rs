@@ -1,6 +1,7 @@
 mod api;
 mod db;
 mod executor;
+mod notify;
 mod schedule;
 mod scheduler;
 
