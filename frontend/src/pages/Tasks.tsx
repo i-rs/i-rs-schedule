@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, runTask, type Task } from "@/api";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
-import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap, Loader2, Copy, Check } from "lucide-react";
+import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap, Loader2, Copy, Check, Bell } from "lucide-react";
 
 interface TaskForm {
   name: string;
@@ -24,6 +24,8 @@ interface TaskForm {
   http_url: string;
   http_body: string;
   shell_cmd: string;
+  notify_type: "none" | "webhook" | "feishu" | "dingtalk";
+  notify_url: string;
 }
 
 const emptyForm: TaskForm = {
@@ -36,6 +38,8 @@ const emptyForm: TaskForm = {
   http_url: "",
   http_body: "",
   shell_cmd: "",
+  notify_type: "none",
+  notify_url: "",
 };
 
 const cronPresets = [
@@ -88,6 +92,8 @@ export default function Tasks() {
       ...(form.task_type === "http"
         ? { http_method: form.http_method, http_url: form.http_url, http_body: form.http_body || undefined }
         : { shell_cmd: form.shell_cmd }),
+      notify_type: form.notify_type,
+      ...(form.notify_type !== "none" ? { notify_url: form.notify_url } : {}),
     };
 
     setSubmitting(true);
@@ -122,6 +128,8 @@ export default function Tasks() {
       http_url: t.task_type.type === "http" ? t.task_type.url : "",
       http_body: t.task_type.type === "http" ? (t.task_type.body ?? "") : "",
       shell_cmd: t.task_type.type === "shell" ? t.task_type.cmd : "",
+      notify_type: (t.notify_type as TaskForm["notify_type"]) || "none",
+      notify_url: t.notify_url ?? "",
     });
     setShowDialog(true);
   };
@@ -241,6 +249,9 @@ export default function Tasks() {
                         <Clock className="mr-1 h-3 w-3" />
                         {t.schedule.type === "cron" ? t.schedule.expr : `${t.schedule.delay_secs}s`}
                       </Badge>
+                      {t.notify_type !== "none" && (
+                        <Bell className="h-3 w-3 text-amber-400" />
+                      )}
                     </div>
                     <div className="flex items-center gap-1.5 min-w-0">
                       <p className="text-xs text-muted-foreground truncate font-mono">{url}</p>
@@ -426,6 +437,36 @@ export default function Tasks() {
                 />
               </div>
             )}
+
+            <div className="space-y-1.5">
+              <Label>Notification</Label>
+              <div className="flex gap-3">
+                <Select value={form.notify_type} onValueChange={(v) => setForm({ ...form, notify_type: v as TaskForm["notify_type"] })}>
+                  <SelectTrigger className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    <SelectItem value="webhook">Webhook</SelectItem>
+                    <SelectItem value="feishu">飞书</SelectItem>
+                    <SelectItem value="dingtalk">钉钉</SelectItem>
+                  </SelectContent>
+                </Select>
+                {form.notify_type !== "none" && (
+                  <Input
+                    value={form.notify_url}
+                    onChange={(e) => setForm({ ...form, notify_url: e.target.value })}
+                    placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."
+                    className="flex-1 font-mono"
+                  />
+                )}
+              </div>
+              {form.notify_type !== "none" && (
+                <p className="text-xs text-muted-foreground">
+                  任务失败时推送,失败后恢复会再推一条。
+                </p>
+              )}
+            </div>
           </div>
 
           <DialogFooter>
