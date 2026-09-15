@@ -9,7 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, runTask, type Task } from "@/api";
+import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, runTask, exportTasks, importTasks, type Task } from "@/api";
+import { useRef } from "react";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
 import { timeUntil } from "@/lib/time";
@@ -66,6 +67,7 @@ export default function Tasks() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
+  const importFileRef = useRef<HTMLInputElement>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -194,6 +196,48 @@ export default function Tasks() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-3xl font-bold tracking-tight">Tasks</h1>
         <div className="flex gap-2">
+          <input
+            ref={importFileRef}
+            type="file"
+            accept="application/json"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              try {
+                const text = await file.text();
+                const payload = JSON.parse(text);
+                const res = await importTasks(payload);
+                toast.success(`Imported ${res.imported}, skipped ${res.skipped}`);
+                await load();
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : String(err));
+              }
+              e.target.value = "";
+            }}
+          />
+          <Button
+            variant="outline"
+            onClick={async () => {
+              try {
+                const data = await exportTasks();
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `i-rs-schedule-tasks-${new Date().toISOString().slice(0, 10)}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : String(err));
+              }
+            }}
+          >
+            Export
+          </Button>
+          <Button variant="outline" onClick={() => importFileRef.current?.click()}>
+            Import
+          </Button>
           <Button size="icon" variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className="h-4 w-4" />
           </Button>

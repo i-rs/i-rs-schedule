@@ -123,3 +123,14 @@ export async function listExecutions(taskId?: string, limit = 50): Promise<TaskE
   params.set("limit", limit.toString());
   return request<TaskExecution[]>(`/api/executions?${params}`);
 }
+
+export async function exportTasks(): Promise<{ version: string; tasks: Task[] }> {
+  return request("/api/export/tasks");
+}
+
+export async function importTasks(payload: { version: string; tasks: Task[] }): Promise<{ imported: number; skipped: number }> {
+  return request("/api/import/tasks", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}

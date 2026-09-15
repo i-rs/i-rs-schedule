@@ -354,6 +354,54 @@ pub fn build_router(
         }
     });
 
+    // 导出:全部任务(不含执行历史)。
+    {
+        let db_export = db.clone();
+        router.get("/api/export/tasks", move |_req: Request| {
+            let db = db_export.clone();
+            async move {
+                let tasks = db
+                    .list_all_tasks()
+                    .await
+                    .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                ok(serde_json::json!({ "version": "0.2", "tasks": tasks }))
+            }
+        });
+    }
+
+    // 导入:跳过已存在的 id,返回 {imported, skipped}。
+    {
+        let db_import = db.clone();
+        router.post("/api/import/tasks", move |mut req: Request| {
+            let db = db_import.clone();
+            async move {
+                #[derive(Deserialize)]
+                struct ImportBody {
+                    tasks: Vec<Task>,
+                }
+                let body: ImportBody = req
+                    .body()
+                    .await
+                    .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
+                let mut imported = 0u64;
+                let mut skipped = 0u64;
+                for task in body.tasks {
+                    match db.get_task(&task.id).await {
+                        Ok(Some(_)) => {
+                            skipped += 1;
+                        }
+                        Ok(None) => match db.create_task(&task).await {
+                            Ok(()) => imported += 1,
+                            Err(e) => return Err(err_msg(500, format!("db error: {e}"))),
+                        },
+                        Err(e) => return Err(err_msg(500, format!("db error: {e}"))),
+                    }
+                }
+                ok(serde_json::json!({ "imported": imported, "skipped": skipped }))
+            }
+        });
+    }
+
     // 可选 Bearer 认证:设置 SCHEDULE_TOKEN 后全 API 要求携带,否则 401。
     if let Ok(token) = std::env::var("SCHEDULE_TOKEN")
         && !token.is_empty()
