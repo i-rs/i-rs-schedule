@@ -292,7 +292,7 @@ export default function Tasks() {
       )}
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>{editingId ? "Edit Task" : "Create Task"}</DialogTitle>
           </DialogHeader>

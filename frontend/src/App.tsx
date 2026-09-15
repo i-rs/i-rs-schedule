@@ -33,6 +33,14 @@ function DocumentTitle() {
   return null;
 }
 
+/** 顶栏中的当前页面名,给空旷的 header 提供上下文。 */
+function HeaderPageName() {
+  const { pathname } = useLocation();
+  const name = pageTitles[pathname];
+  if (!name) return null;
+  return <span className="text-sm text-muted-foreground">{name}</span>;
+}
+
 function SidebarNav() {
   const { setOpenMobile, state } = useSidebar();
   const collapsed = state === "collapsed";
@@ -115,6 +123,7 @@ function App() {
             <main className="flex-1 flex flex-col min-w-0">
               <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border/50 bg-background/70 px-4 py-3 backdrop-blur-md">
                 <SidebarTrigger />
+                <span className="hidden sm:inline"><HeaderPageName /></span>
                 <span className="font-bold text-lg tracking-tight md:hidden">i-rs-schedule</span>
                 <div className="flex-1" />
                 <Button size="icon-sm" variant="ghost" onClick={toggle}>
