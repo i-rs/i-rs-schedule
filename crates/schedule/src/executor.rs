@@ -33,10 +33,12 @@ impl Executor {
                 headers,
                 body,
             } => {
-                self.execute_http(method, url, headers, body.as_deref())
+                self.execute_http(method, url, headers, body.as_deref(), task.timeout_secs)
                     .await
             }
-            TaskType::Shell { cmd } => Self::execute_shell(cmd).await,
+            TaskType::Shell { cmd } => {
+                Self::execute_shell(cmd, Duration::from_secs(task.timeout_secs)).await
+            }
         }
     }
 
@@ -128,6 +130,7 @@ impl Executor {
         url: &str,
         headers: &Option<serde_json::Value>,
         body: Option<&str>,
+        task_timeout: u64,
     ) -> ExecutionResult {
         let method = reqwest::Method::from_bytes(method.to_uppercase().as_bytes())
             .unwrap_or(reqwest::Method::GET);
@@ -144,6 +147,8 @@ impl Executor {
         if let Some(b) = body {
             req = req.body(b.to_string());
         }
+
+        let req = req.timeout(Duration::from_secs(task_timeout));
 
         match req.send().await {
             Ok(resp) => {
@@ -168,10 +173,10 @@ impl Executor {
         }
     }
 
-    async fn execute_shell(cmd: &str) -> ExecutionResult {
-        // 与 HTTP 任务一致,给 shell 执行也加 30s 超时,防止无限运行占住执行槽。
+    async fn execute_shell(cmd: &str, timeout: Duration) -> ExecutionResult {
+        // 与 HTTP 一致按任务配置超时,防止无限运行占住执行槽。
         match tokio::time::timeout(
-            Duration::from_secs(30),
+            timeout,
             tokio::process::Command::new("sh")
                 .arg("-c")
                 .arg(cmd)
@@ -203,7 +208,7 @@ impl Executor {
             },
             Err(_) => ExecutionResult {
                 status: "failure".to_string(),
-                output: "shell command timed out after 30s".to_string(),
+                output: format!("shell command timed out after {}s", timeout.as_secs()),
                 http_status: None,
             },
         }

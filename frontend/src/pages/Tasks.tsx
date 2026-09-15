@@ -26,6 +26,7 @@ interface TaskForm {
   http_body: string;
   shell_cmd: string;
   timezone: string;
+  timeout_secs: string;
   notify_type: "none" | "webhook" | "feishu" | "dingtalk";
   notify_url: string;
 }
@@ -41,6 +42,7 @@ const emptyForm: TaskForm = {
   http_body: "",
   shell_cmd: "",
   timezone: "UTC",
+  timeout_secs: "30",
   notify_type: "none",
   notify_url: "",
 };
@@ -96,6 +98,7 @@ export default function Tasks() {
         ? { http_method: form.http_method, http_url: form.http_url, http_body: form.http_body || undefined }
         : { shell_cmd: form.shell_cmd }),
       timezone: form.timezone,
+      timeout_secs: parseInt(form.timeout_secs) || 30,
       notify_type: form.notify_type,
       ...(form.notify_type !== "none" ? { notify_url: form.notify_url } : {}),
     };
@@ -133,6 +136,7 @@ export default function Tasks() {
       http_body: t.task_type.type === "http" ? (t.task_type.body ?? "") : "",
       shell_cmd: t.task_type.type === "shell" ? t.task_type.cmd : "",
       timezone: t.timezone || "UTC",
+      timeout_secs: (t.timeout_secs ?? 30).toString(),
       notify_type: (t.notify_type as TaskForm["notify_type"]) || "none",
       notify_url: t.notify_url ?? "",
     });
@@ -365,6 +369,17 @@ export default function Tasks() {
                           {p.label}
                         </button>
                       ))}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-1.5">
+                        <Label className="text-xs text-muted-foreground">Timeout (s)</Label>
+                        <Input
+                          type="number"
+                          value={form.timeout_secs}
+                          onChange={(e) => setForm({ ...form, timeout_secs: e.target.value })}
+                          className="w-24 h-7 text-xs"
+                        />
+                      </div>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Label className="text-xs text-muted-foreground">Timezone</Label>
