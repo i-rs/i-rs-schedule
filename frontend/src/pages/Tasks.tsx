@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, runTask, type Task } from "@/api";
@@ -43,6 +43,7 @@ export default function Tasks() {
   const [form, setForm] = useState<TaskForm>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -230,11 +231,7 @@ export default function Tasks() {
                       size="icon-sm"
                       variant="ghost"
                       title="Delete"
-                      onClick={() => {
-                        if (confirm("Delete this task?")) {
-                          act(() => deleteTask(t.id), "Task deleted");
-                        }
-                      }}
+                      onClick={() => setDeleteTarget(t)}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
@@ -360,6 +357,32 @@ export default function Tasks() {
             <Button variant="outline" onClick={() => setShowDialog(false)} disabled={submitting}>Cancel</Button>
             <Button onClick={handleSubmit} disabled={!form.name || submitting}>
               {submitting ? "Saving..." : editingId ? "Update" : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="sm:max-w-sm" showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Delete Task</DialogTitle>
+            <DialogDescription>
+              Delete <span className="font-medium text-foreground">{deleteTarget?.name}</span>? Its
+              execution history will be removed as well. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (deleteTarget) {
+                  act(() => deleteTask(deleteTarget.id), "Task deleted");
+                }
+                setDeleteTarget(null);
+              }}
+            >
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>

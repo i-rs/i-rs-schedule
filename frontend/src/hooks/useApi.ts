@@ -10,7 +10,7 @@ export function useApi<T>(fn: () => Promise<T>, deps: unknown[]) {
   const [error, setError] = useState<Error | null>(null);
   const alive = useRef(true);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- deps 由调用方传入,静态检查无法穷举
   const run = useCallback(async () => {
     setLoading(true);
     try {
@@ -28,6 +28,7 @@ export function useApi<T>(fn: () => Promise<T>, deps: unknown[]) {
         setLoading(false);
       }
     }
+    // oxlint-disable-next-line exhaustive-deps
   }, deps);
 
   useEffect(() => {
