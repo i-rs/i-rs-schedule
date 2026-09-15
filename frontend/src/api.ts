@@ -5,6 +5,7 @@ export interface Task {
   enabled: boolean;
   schedule: { type: "cron"; expr: string } | { type: "once"; delay_secs: number };
   timezone: string;
+  timeout_secs: number;
   next_run_at: string | null;
   notify_type: string;
   notify_url: string;
@@ -78,6 +79,7 @@ export interface CreateTaskPayload {
   http_body?: string;
   shell_cmd?: string;
   timezone?: string;
+  timeout_secs?: number;
   notify_type?: string;
   notify_url?: string;
 }

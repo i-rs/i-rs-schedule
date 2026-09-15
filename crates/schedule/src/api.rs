@@ -61,6 +61,7 @@ struct CreateTaskRequest {
     shell_cmd: Option<String>,
     enabled: Option<bool>,
     timezone: Option<String>,
+    timeout_secs: Option<u64>,
     notify_type: Option<String>,
     notify_url: Option<String>,
 }
@@ -97,6 +98,10 @@ fn build_task(body: CreateTaskRequest) -> Result<Task, String> {
 
     let timezone = body.timezone.unwrap_or_else(|| "UTC".into());
     crate::schedule::validate_timezone(&timezone)?;
+    let timeout_secs = body.timeout_secs.unwrap_or(30);
+    if timeout_secs == 0 || timeout_secs > 3600 {
+        return Err("timeout_secs must be between 1 and 3600".into());
+    }
 
     let notify_type = body.notify_type.unwrap_or_else(|| "none".into());
     let notify_url = body.notify_url.unwrap_or_default();
@@ -119,6 +124,7 @@ fn build_task(body: CreateTaskRequest) -> Result<Task, String> {
     task.notify_type = notify_type;
     task.notify_url = notify_url;
     task.timezone = timezone;
+    task.timeout_secs = timeout_secs;
     Ok(task)
 }
 
