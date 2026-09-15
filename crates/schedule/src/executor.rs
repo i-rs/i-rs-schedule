@@ -146,13 +146,17 @@ impl Executor {
     }
 
     async fn execute_shell(cmd: &str) -> ExecutionResult {
-        match tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
-            .output()
-            .await
+        // 与 HTTP 任务一致,给 shell 执行也加 30s 超时,防止无限运行占住执行槽。
+        match tokio::time::timeout(
+            Duration::from_secs(30),
+            tokio::process::Command::new("sh")
+                .arg("-c")
+                .arg(cmd)
+                .output(),
+        )
+        .await
         {
-            Ok(out) => {
+            Ok(Ok(out)) => {
                 let status = if out.status.success() {
                     "success"
                 } else {
@@ -169,9 +173,14 @@ impl Executor {
                     http_status: None,
                 }
             }
-            Err(e) => ExecutionResult {
+            Ok(Err(e)) => ExecutionResult {
                 status: "failure".to_string(),
                 output: e.to_string(),
+                http_status: None,
+            },
+            Err(_) => ExecutionResult {
+                status: "failure".to_string(),
+                output: "shell command timed out after 30s".to_string(),
                 http_status: None,
             },
         }

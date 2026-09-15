@@ -127,6 +127,16 @@ struct CreateTaskBody {
 
 async fn print_response(resp: reqwest::Response) -> Result<()> {
     let val: serde_json::Value = resp.json().await?;
+    // 服务端错误信封(code != 0)输出到 stderr 并以非零码退出,便于脚本感知失败。
+    let code = val.get("code").and_then(|c| c.as_u64()).unwrap_or(0);
+    if code != 0 {
+        let msg = val
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("unknown error");
+        eprintln!("error ({code}): {msg}");
+        std::process::exit(1);
+    }
     println!("{}", serde_json::to_string_pretty(&val)?);
     Ok(())
 }

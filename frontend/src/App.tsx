@@ -1,8 +1,9 @@
 import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
-import Dashboard from "@/pages/Dashboard";
-import Tasks from "@/pages/Tasks";
-import Executions from "@/pages/Executions";
-import { LayoutDashboard, ListTodo, ScrollText, Sun, Moon } from "lucide-react";
+import { lazy, Suspense } from "react";
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const Tasks = lazy(() => import("@/pages/Tasks"));
+const Executions = lazy(() => import("@/pages/Executions"));
+import { LayoutDashboard, ListTodo, ScrollText, Sun, Moon, RefreshCw } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import { SidebarProvider, Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
@@ -104,11 +105,19 @@ function App() {
                 </Button>
               </header>
               <div className="flex-1 p-4 md:p-8 overflow-auto">
-                <Routes>
-                  <Route path="/" element={<Dashboard />} />
-                  <Route path="/tasks" element={<Tasks />} />
-                  <Route path="/executions" element={<Executions />} />
-                </Routes>
+                <Suspense
+                  fallback={
+                    <div className="flex h-full items-center justify-center text-muted-foreground">
+                      <RefreshCw className="h-5 w-5 animate-spin" />
+                    </div>
+                  }
+                >
+                  <Routes>
+                    <Route path="/" element={<Dashboard />} />
+                    <Route path="/tasks" element={<Tasks />} />
+                    <Route path="/executions" element={<Executions />} />
+                  </Routes>
+                </Suspense>
               </div>
             </main>
           </div>

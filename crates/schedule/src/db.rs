@@ -212,6 +212,9 @@ impl Db {
                 finished_at TEXT,
                 FOREIGN KEY (task_id) REFERENCES tasks(id)
             );
+
+            CREATE INDEX IF NOT EXISTS idx_task_executions_task_id ON task_executions(task_id);
+            CREATE INDEX IF NOT EXISTS idx_task_executions_started_at ON task_executions(started_at);
             ",
         )
         .context("init sqlite schema")?;
@@ -390,11 +393,14 @@ impl Db {
         let pool = self.pool.clone();
         let id = id.to_string();
         spawn_db(pool, move |conn| {
-            conn.execute(
+            // 事务保证任务与执行记录原子删除,避免中间失败留下不一致。
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
                 "DELETE FROM task_executions WHERE task_id = ?1",
                 params![&id],
             )?;
-            let affected = conn.execute("DELETE FROM tasks WHERE id = ?1", params![&id])?;
+            let affected = tx.execute("DELETE FROM tasks WHERE id = ?1", params![&id])?;
+            tx.commit()?;
             Ok(affected > 0)
         })
         .await

@@ -1,15 +1,16 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, runTask, type Task } from "@/api";
 import { toast } from "@/hooks/useToast";
+import { useApi } from "@/hooks/useApi";
 import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap } from "lucide-react";
 
 interface TaskForm {
@@ -37,27 +38,17 @@ const emptyForm: TaskForm = {
 };
 
 export default function Tasks() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: tasksData, loading, error, reload: load } = useApi<Task[]>(listTasks, []);
+  const tasks = tasksData ?? [];
   const [showDialog, setShowDialog] = useState(false);
   const [form, setForm] = useState<TaskForm>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setTasks(await listTasks());
-    } catch (e) {
-      toast.error(`Failed to load tasks: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (error) toast.error(`Failed to load tasks: ${error.message}`);
+  }, [error]);
 
   const handleSubmit = async () => {
     if (!form.name.trim()) {
@@ -230,11 +221,7 @@ export default function Tasks() {
                       size="icon-sm"
                       variant="ghost"
                       title="Delete"
-                      onClick={() => {
-                        if (confirm("Delete this task?")) {
-                          act(() => deleteTask(t.id), "Task deleted");
-                        }
-                      }}
+                      onClick={() => setDeleteTarget(t)}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
@@ -360,6 +347,32 @@ export default function Tasks() {
             <Button variant="outline" onClick={() => setShowDialog(false)} disabled={submitting}>Cancel</Button>
             <Button onClick={handleSubmit} disabled={!form.name || submitting}>
               {submitting ? "Saving..." : editingId ? "Update" : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="sm:max-w-sm" showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Delete Task</DialogTitle>
+            <DialogDescription>
+              Delete <span className="font-medium text-foreground">{deleteTarget?.name}</span>? Its
+              execution history will be removed as well. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (deleteTarget) {
+                  act(() => deleteTask(deleteTarget.id), "Task deleted");
+                }
+                setDeleteTarget(null);
+              }}
+            >
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>

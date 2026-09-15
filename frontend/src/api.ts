@@ -44,7 +44,7 @@ export async function getTask(id: string): Promise<Task> {
   return request<Task>(`/api/tasks/${id}`);
 }
 
-export async function createTask(data: {
+export interface CreateTaskPayload {
   name: string;
   task_type: string;
   schedule_type: string;
@@ -55,28 +55,16 @@ export async function createTask(data: {
   http_headers?: unknown;
   http_body?: string;
   shell_cmd?: string;
-}): Promise<Task> {
+}
+
+export async function createTask(data: CreateTaskPayload): Promise<Task> {
   return request<Task>("/api/tasks", {
     method: "POST",
     body: JSON.stringify(data),
   });
 }
 
-export async function updateTask(
-  id: string,
-  data: {
-    name: string;
-    task_type: string;
-    schedule_type: string;
-    cron_expr?: string;
-    delay_secs?: number;
-    http_method?: string;
-    http_url?: string;
-    http_headers?: unknown;
-    http_body?: string;
-    shell_cmd?: string;
-  },
-): Promise<Task> {
+export async function updateTask(id: string, data: CreateTaskPayload): Promise<Task> {
   return request<Task>(`/api/tasks/${id}`, {
     method: "PUT",
     body: JSON.stringify(data),
