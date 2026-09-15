@@ -12,6 +12,10 @@ struct Cli {
     #[arg(long, default_value = "http://localhost:3000")]
     server: String,
 
+    /// API token(优先于 SCHEDULE_TOKEN 环境变量)
+    #[arg(long)]
+    token: Option<String>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -158,7 +162,19 @@ async fn print_response(resp: reqwest::Response) -> Result<()> {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let base = std::env::var("SCHEDULE_SERVER").unwrap_or(cli.server);
-    let client = reqwest::Client::new();
+    let token = cli.token.or_else(|| std::env::var("SCHEDULE_TOKEN").ok());
+
+    let mut builder = reqwest::Client::builder();
+    if let Some(token) = token.as_deref().filter(|t| !t.is_empty()) {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "authorization",
+            reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
+                .context("invalid token characters")?,
+        );
+        builder = builder.default_headers(headers);
+    }
+    let client = builder.build()?;
 
     match cli.command {
         Command::Task(cmd) => match cmd {
