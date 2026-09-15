@@ -38,6 +38,15 @@ const emptyForm: TaskForm = {
   shell_cmd: "",
 };
 
+const cronPresets = [
+  { label: "Every minute", expr: "0 * * * * *" },
+  { label: "Every 5 min", expr: "0 */5 * * * *" },
+  { label: "Every 15 min", expr: "0 */15 * * * *" },
+  { label: "Hourly", expr: "0 0 * * * *" },
+  { label: "Daily", expr: "0 0 0 * * *" },
+  { label: "Weekdays 9am", expr: "0 0 9 * * 1-5" },
+];
+
 export default function Tasks() {
   const { data: tasksData, loading, error, reload: load } = useApi<Task[]>(listTasks, []);
   const tasks = tasksData ?? [];
@@ -62,6 +71,10 @@ export default function Tasks() {
     }
     if (form.task_type === "http" && !form.http_url.trim()) {
       toast.error("URL is required for HTTP tasks");
+      return;
+    }
+    if (form.task_type === "http" && !/^https?:\/\//.test(form.http_url.trim())) {
+      toast.error("URL must start with http:// or https://");
       return;
     }
 
@@ -270,7 +283,23 @@ export default function Tasks() {
                 </Select>
                 {form.schedule_type === "cron" ? (
                   <div className="space-y-2 flex-1">
-                    <Input value={form.cron_expr} onChange={(e) => setForm({ ...form, cron_expr: e.target.value })} placeholder="0 */5 * * * *" />
+                    <Input value={form.cron_expr} onChange={(e) => setForm({ ...form, cron_expr: e.target.value })} placeholder="0 */5 * * * *" className="font-mono" />
+                    <div className="flex flex-wrap gap-1.5">
+                      {cronPresets.map((p) => (
+                        <button
+                          key={p.expr}
+                          type="button"
+                          onClick={() => setForm({ ...form, cron_expr: p.expr })}
+                          className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors cursor-pointer ${
+                            form.cron_expr === p.expr
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
                     <details className="text-xs text-muted-foreground">
                       <summary className="cursor-pointer hover:text-foreground">Cron reference</summary>
                       <div className="mt-2 rounded-md border bg-muted/50 p-3 space-y-2 overflow-x-auto">
