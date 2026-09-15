@@ -171,8 +171,10 @@ export default function Executions() {
           ))}
         </div>
       ) : execs.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-          <Inbox className="h-14 w-14 mb-4 text-primary/40" />
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-20 text-muted-foreground">
+          <span className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 mb-4">
+            <Inbox className="h-7 w-7 text-primary/60" />
+          </span>
           <p className="text-sm font-medium">No execution logs yet</p>
           <p className="text-xs mt-1 text-muted-foreground/70">Tasks will appear here once they start running.</p>
         </div>
