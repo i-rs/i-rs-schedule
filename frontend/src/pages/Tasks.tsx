@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -11,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, runTask, type Task } from "@/api";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
-import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap } from "lucide-react";
+import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap, Loader2, Copy, Check } from "lucide-react";
 
 interface TaskForm {
   name: string;
@@ -37,6 +38,15 @@ const emptyForm: TaskForm = {
   shell_cmd: "",
 };
 
+const cronPresets = [
+  { label: "Every minute", expr: "0 * * * * *" },
+  { label: "Every 5 min", expr: "0 */5 * * * *" },
+  { label: "Every 15 min", expr: "0 */15 * * * *" },
+  { label: "Hourly", expr: "0 0 * * * *" },
+  { label: "Daily", expr: "0 0 0 * * *" },
+  { label: "Weekdays 9am", expr: "0 0 9 * * 1-5" },
+];
+
 export default function Tasks() {
   const { data: tasksData, loading, error, reload: load } = useApi<Task[]>(listTasks, []);
   const tasks = tasksData ?? [];
@@ -45,6 +55,8 @@ export default function Tasks() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
+  const [runningId, setRunningId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (error) toast.error(`Failed to load tasks: ${error.message}`);
@@ -61,6 +73,10 @@ export default function Tasks() {
     }
     if (form.task_type === "http" && !form.http_url.trim()) {
       toast.error("URL is required for HTTP tasks");
+      return;
+    }
+    if (form.task_type === "http" && !/^https?:\/\//.test(form.http_url.trim())) {
+      toast.error("URL must start with http:// or https://");
       return;
     }
 
@@ -127,6 +143,31 @@ export default function Tasks() {
     }
   };
 
+  // Run 是同步请求(等待执行完成),需要按任务粒度的 loading 反馈。
+  const runTaskNow = async (id: string) => {
+    setRunningId(id);
+    try {
+      await runTask(id);
+      toast.success("Task triggered");
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunningId(null);
+    }
+  };
+
+  const copyUrl = async (t: Task) => {
+    const url = t.task_type.type === "http" ? t.task_type.url : t.task_type.cmd;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedId(t.id);
+      setTimeout(() => setCopiedId((cur) => (cur === t.id ? null : cur)), 1500);
+    } catch {
+      toast.error("Failed to copy");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -164,8 +205,10 @@ export default function Tasks() {
           ))}
         </div>
       ) : tasks.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-          <Inbox className="h-14 w-14 mb-4 text-primary/40" />
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-20 text-muted-foreground">
+          <span className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 mb-4">
+            <Inbox className="h-7 w-7 text-primary/60" />
+          </span>
           <p className="text-sm font-medium">No tasks yet</p>
           <p className="text-xs mt-1 text-muted-foreground/70">Create one to start scheduling.</p>
           <Button size="sm" onClick={openCreate} className="mt-4">
@@ -199,7 +242,16 @@ export default function Tasks() {
                         {t.schedule.type === "cron" ? t.schedule.expr : `${t.schedule.delay_secs}s`}
                       </Badge>
                     </div>
-                    <p className="text-xs text-muted-foreground truncate font-mono">{url}</p>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <p className="text-xs text-muted-foreground truncate font-mono">{url}</p>
+                      <button
+                        title="Copy"
+                        onClick={() => copyUrl(t)}
+                        className="shrink-0 text-muted-foreground/50 hover:text-foreground transition-all cursor-pointer"
+                      >
+                        {copiedId === t.id ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                      </button>
+                    </div>
                   </div>
                   <div className="flex items-center gap-1 opacity-60 transition-opacity duration-200 group-hover/task:opacity-100">
                     {t.enabled ? (
@@ -211,8 +263,14 @@ export default function Tasks() {
                         <Play className="h-4 w-4" />
                       </Button>
                     )}
-                    <Button size="icon-sm" variant="ghost" title="Run Now" onClick={() => act(() => runTask(t.id), "Task triggered")}>
-                      <Zap className="h-4 w-4" />
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      title={runningId === t.id ? "Running..." : "Run Now"}
+                      disabled={runningId === t.id}
+                      onClick={() => runTaskNow(t.id)}
+                    >
+                      {runningId === t.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
                     </Button>
                     <Button size="icon-sm" variant="ghost" title="Edit" onClick={() => openEdit(t)}>
                       <Pencil className="h-4 w-4" />
@@ -269,7 +327,23 @@ export default function Tasks() {
                 </Select>
                 {form.schedule_type === "cron" ? (
                   <div className="space-y-2 flex-1">
-                    <Input value={form.cron_expr} onChange={(e) => setForm({ ...form, cron_expr: e.target.value })} placeholder="0 */5 * * * *" />
+                    <Input value={form.cron_expr} onChange={(e) => setForm({ ...form, cron_expr: e.target.value })} placeholder="0 */5 * * * *" className="font-mono" />
+                    <div className="flex flex-wrap gap-1.5">
+                      {cronPresets.map((p) => (
+                        <button
+                          key={p.expr}
+                          type="button"
+                          onClick={() => setForm({ ...form, cron_expr: p.expr })}
+                          className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors cursor-pointer ${
+                            form.cron_expr === p.expr
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
                     <details className="text-xs text-muted-foreground">
                       <summary className="cursor-pointer hover:text-foreground">Cron reference</summary>
                       <div className="mt-2 rounded-md border bg-muted/50 p-3 space-y-2 overflow-x-auto">
@@ -332,13 +406,24 @@ export default function Tasks() {
                 </div>
                 <div className="space-y-1.5">
                   <Label>Body (optional)</Label>
-                  <Input value={form.http_body} onChange={(e) => setForm({ ...form, http_body: e.target.value })} placeholder='{"key": "value"}' />
+                  <Textarea
+                    value={form.http_body}
+                    onChange={(e) => setForm({ ...form, http_body: e.target.value })}
+                    placeholder={'{\n  "key": "value"\n}'}
+                    className="font-mono min-h-[80px]"
+                  />
                 </div>
               </>
             ) : (
               <div className="space-y-1.5">
                 <Label>Command</Label>
-                <Input value={form.shell_cmd} onChange={(e) => setForm({ ...form, shell_cmd: e.target.value })} placeholder="echo hello" />
+                <Textarea
+                  value={form.shell_cmd}
+                  onChange={(e) => setForm({ ...form, shell_cmd: e.target.value })}
+                  placeholder="echo hello"
+                  className="font-mono min-h-[64px]"
+                  rows={2}
+                />
               </div>
             )}
           </div>

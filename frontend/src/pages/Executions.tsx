@@ -3,6 +3,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listExecutions, listTasks, type TaskExecution, type Task } from "@/api";
 import { toast } from "@/hooks/useToast";
@@ -31,14 +33,17 @@ function fmtDuration(start: string, end: string | null) {
   return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
 }
 
-function ExecutionCard({ e, task }: { e: TaskExecution; task?: Task }) {
+function ExecutionCard({ e, task, onOpen }: { e: TaskExecution; task?: Task; onOpen?: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const cfg = statusConfig[e.status] ?? statusConfig.failure;
   const Icon = cfg.icon;
   const duration = fmtDuration(e.started_at, e.finished_at);
 
   return (
-    <Card className={`border-l-4 ${cfg.border} shadow-[var(--shadow-card)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-card-hover)]`}>
+    <Card
+      onClick={onOpen}
+      className={`cursor-pointer border-l-4 ${cfg.border} shadow-[var(--shadow-card)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-card-hover)]`}
+    >
       <CardContent className="py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0 space-y-2">
@@ -58,7 +63,10 @@ function ExecutionCard({ e, task }: { e: TaskExecution; task?: Task }) {
             {e.output && (
               <div>
                 <button
-                  onClick={() => setExpanded(!expanded)}
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    setExpanded(!expanded);
+                  }}
                   className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
                 >
                   {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
@@ -86,6 +94,8 @@ function ExecutionCard({ e, task }: { e: TaskExecution; task?: Task }) {
 export default function Executions() {
   const [filterTaskId, setFilterTaskId] = useState("all");
   const [limit, setLimit] = useState(20);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [detailExec, setDetailExec] = useState<TaskExecution | null>(null);
 
   const { data, loading, error, reload } = useApi<[TaskExecution[], Task[]]>(
     () =>
@@ -101,6 +111,8 @@ export default function Executions() {
   }, [error]);
 
   const [execs, tasks] = data ?? [[], []];
+  // 状态过滤只作用于已加载列表(展示层),分页边界仍按原始数据计算
+  const visibleExecs = statusFilter === "all" ? execs : execs.filter((e) => e.status === statusFilter);
   // 已到末尾:返回条数少于请求 limit
   const atEnd = execs.length < limit;
 
@@ -108,7 +120,16 @@ export default function Executions() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-3xl font-bold tracking-tight">Execution Logs</h1>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Tabs value={statusFilter} onValueChange={setStatusFilter}>
+            <TabsList>
+              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="success">Success</TabsTrigger>
+              <TabsTrigger value="failure">Failure</TabsTrigger>
+              <TabsTrigger value="running">Running</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <div className="flex gap-2">
           <Select value={filterTaskId} onValueChange={(v) => { setFilterTaskId(v || "all"); setLimit(20); }}>
             <SelectTrigger className="w-full sm:w-48">
               <SelectValue placeholder="All Tasks" />
@@ -125,6 +146,7 @@ export default function Executions() {
           <Button size="icon" variant="outline" onClick={reload} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
+          </div>
         </div>
       </div>
 
@@ -149,18 +171,20 @@ export default function Executions() {
           ))}
         </div>
       ) : execs.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-          <Inbox className="h-14 w-14 mb-4 text-primary/40" />
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-20 text-muted-foreground">
+          <span className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 mb-4">
+            <Inbox className="h-7 w-7 text-primary/60" />
+          </span>
           <p className="text-sm font-medium">No execution logs yet</p>
           <p className="text-xs mt-1 text-muted-foreground/70">Tasks will appear here once they start running.</p>
         </div>
       ) : (
         <div className="space-y-3">
-          {execs.map((e, i) => {
+          {visibleExecs.map((e, i) => {
             const task = tasks.find((t) => t.id === e.task_id);
             return (
               <div key={e.id} style={{ animationDelay: `${Math.min(i, 12) * 40}ms` }} className="stagger-item">
-                <ExecutionCard e={e} task={task} />
+                <ExecutionCard e={e} task={task} onOpen={() => setDetailExec(e)} />
               </div>
             );
           })}
@@ -173,6 +197,47 @@ export default function Executions() {
           )}
         </div>
       )}
+
+      <Dialog open={detailExec !== null} onOpenChange={(open) => !open && setDetailExec(null)}>
+        <DialogContent className="sm:max-w-2xl">
+          {detailExec && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Execution Details</DialogTitle>
+                <DialogDescription>
+                  {tasks.find((t) => t.id === detailExec.task_id)?.name ?? detailExec.task_id.slice(0, 8)}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Status</p>
+                  <Badge variant={detailExec.status === "success" ? "default" : detailExec.status === "running" ? "outline" : "destructive"}>
+                    {detailExec.status}
+                  </Badge>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">HTTP Status</p>
+                  <p className="tabular-nums">{detailExec.http_status ?? "—"}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Started</p>
+                  <p className="text-xs tabular-nums">{fmtTime(detailExec.started_at)}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Duration</p>
+                  <p className="tabular-nums">{fmtDuration(detailExec.started_at, detailExec.finished_at) ?? "—"}</p>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs text-muted-foreground">Output</p>
+                <pre className="rounded-md border border-border/50 bg-muted/50 p-3 text-xs text-muted-foreground font-mono max-h-[50vh] overflow-auto whitespace-pre-wrap">
+                  {detailExec.output ?? "(no output)"}
+                </pre>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
