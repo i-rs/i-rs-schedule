@@ -97,6 +97,9 @@ i-rs-cli task rm --id <uuid>
 | `SCHEDULE_DB` | `./data/schedule.db` | SQLite database path |
 | `SCHEDULE_PORT` | `3000` | API server port |
 | `SCHEDULE_SERVER` | `http://localhost:3000` | CLI server address |
+| `SCHEDULE_TOKEN` | *(unset)* | API token; when set, all requests require `Authorization: Bearer <token>` |
+| `RETENTION_DAYS` | `30` | Execution history retention; `0` keeps records forever |
+| `RUST_LOG` | `info` | Log level (e.g. `i_rs_schedule=debug`) |
 
 ## Commands
 
