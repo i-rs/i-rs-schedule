@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, runTask, type Task } from "@/api";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
-import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap, Loader2 } from "lucide-react";
+import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap, Loader2, Copy, Check } from "lucide-react";
 
 interface TaskForm {
   name: string;
@@ -56,6 +56,7 @@ export default function Tasks() {
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (error) toast.error(`Failed to load tasks: ${error.message}`);
@@ -156,6 +157,17 @@ export default function Tasks() {
     }
   };
 
+  const copyUrl = async (t: Task) => {
+    const url = t.task_type.type === "http" ? t.task_type.url : t.task_type.cmd;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedId(t.id);
+      setTimeout(() => setCopiedId((cur) => (cur === t.id ? null : cur)), 1500);
+    } catch {
+      toast.error("Failed to copy");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -228,7 +240,16 @@ export default function Tasks() {
                         {t.schedule.type === "cron" ? t.schedule.expr : `${t.schedule.delay_secs}s`}
                       </Badge>
                     </div>
-                    <p className="text-xs text-muted-foreground truncate font-mono">{url}</p>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <p className="text-xs text-muted-foreground truncate font-mono">{url}</p>
+                      <button
+                        title="Copy"
+                        onClick={() => copyUrl(t)}
+                        className="shrink-0 text-muted-foreground/50 hover:text-foreground transition-all cursor-pointer"
+                      >
+                        {copiedId === t.id ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                      </button>
+                    </div>
                   </div>
                   <div className="flex items-center gap-1 opacity-60 transition-opacity duration-200 group-hover/task:opacity-100">
                     {t.enabled ? (
