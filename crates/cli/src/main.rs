@@ -185,7 +185,22 @@ async fn main() -> Result<()> {
             TaskCmd::List(args) => {
                 let url = format!("{base}/api/tasks");
                 let resp = client.get(&url).send().await?;
-                let tasks: Vec<serde_json::Value> = resp.json().await?;
+                // 服务端返回 {code, message, data} 信封,取 data 数组做本地过滤。
+                let val: serde_json::Value = resp.json().await?;
+                let code = val.get("code").and_then(|c| c.as_u64()).unwrap_or(0);
+                if code != 0 {
+                    let msg = val
+                        .get("message")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("unknown error");
+                    eprintln!("error ({code}): {msg}");
+                    std::process::exit(1);
+                }
+                let tasks = val
+                    .get("data")
+                    .and_then(|d| d.as_array())
+                    .cloned()
+                    .unwrap_or_default();
                 let filtered: Vec<&serde_json::Value> = match args.enabled {
                     Some(enabled) => tasks
                         .iter()
