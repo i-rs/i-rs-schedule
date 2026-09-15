@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, runTask, type Task } from "@/api";
 import { toast } from "@/hooks/useToast";
+import { useApi } from "@/hooks/useApi";
 import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap } from "lucide-react";
 
 interface TaskForm {
@@ -37,28 +38,17 @@ const emptyForm: TaskForm = {
 };
 
 export default function Tasks() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: tasksData, loading, error, reload: load } = useApi<Task[]>(listTasks, []);
+  const tasks = tasksData ?? [];
   const [showDialog, setShowDialog] = useState(false);
   const [form, setForm] = useState<TaskForm>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setTasks(await listTasks());
-    } catch (e) {
-      toast.error(`Failed to load tasks: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    if (error) toast.error(`Failed to load tasks: ${error.message}`);
+  }, [error]);
 
   const handleSubmit = async () => {
     if (!form.name.trim()) {

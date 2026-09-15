@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { listExecutions, listTasks, type TaskExecution, type Task } from "@/api";
 import { toast } from "@/hooks/useToast";
+import { useApi } from "@/hooks/useApi";
 import { RefreshCw, CheckCircle2, XCircle, Clock, PauseCircle, ChevronDown, ChevronUp, Inbox } from "lucide-react";
 
 const statusConfig: Record<string, { icon: typeof CheckCircle2; color: string; border: string }> = {
@@ -82,32 +83,23 @@ function ExecutionCard({ e, task }: { e: TaskExecution; task?: Task }) {
 }
 
 export default function Executions() {
-  const [execs, setExecs] = useState<TaskExecution[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
   const [filterTaskId, setFilterTaskId] = useState("all");
   const [limit, setLimit] = useState(20);
-  const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [e, t] = await Promise.all([
+  const { data, loading, error, reload } = useApi<[TaskExecution[], Task[]]>(
+    () =>
+      Promise.all([
         listExecutions(filterTaskId === "all" ? undefined : filterTaskId, limit),
         listTasks(),
-      ]);
-      setExecs(e);
-      setTasks(t);
-    } catch (e) {
-      toast.error(`Failed to load executions: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [filterTaskId, limit]);
+      ]),
+    [filterTaskId, limit],
+  );
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (error) toast.error(`Failed to load executions: ${error.message}`);
+  }, [error]);
 
+  const [execs, tasks] = data ?? [[], []];
   // 已到末尾:返回条数少于请求 limit
   const atEnd = execs.length < limit;
 
@@ -129,7 +121,7 @@ export default function Executions() {
               ))}
             </SelectContent>
           </Select>
-          <Button size="icon" variant="outline" onClick={load} disabled={loading}>
+          <Button size="icon" variant="outline" onClick={reload} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
         </div>

@@ -1,27 +1,28 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listTasks, listExecutions, type Task, type TaskExecution } from "@/api";
 import { toast } from "@/hooks/useToast";
+import { useApi } from "@/hooks/useApi";
 import { ListTodo, Play, CheckCircle2, AlertCircle } from "lucide-react";
 
 export default function Dashboard() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [execs, setExecs] = useState<TaskExecution[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data, loading, error, reload } = useApi<[Task[], TaskExecution[]]>(
+    () => Promise.all([listTasks(), listExecutions(undefined, 20)]),
+    [],
+  );
+
+  // 常驻仪表盘:每 30s 自动刷新
+  useEffect(() => {
+    const id = setInterval(reload, 30_000);
+    return () => clearInterval(id);
+  }, [reload]);
 
   useEffect(() => {
-    Promise.all([listTasks(), listExecutions(undefined, 20)])
-      .then(([t, e]) => {
-        setTasks(t);
-        setExecs(e);
-      })
-      .catch((e) => {
-        toast.error(`Failed to load dashboard: ${e instanceof Error ? e.message : String(e)}`);
-      })
-      .finally(() => setLoading(false));
-  }, []);
+    if (error) toast.error(`Failed to load dashboard: ${error.message}`);
+  }, [error]);
 
+  const [tasks, execs] = data ?? [[], []];
   const enabled = tasks.filter((t) => t.enabled).length;
   const recent = execs.slice(0, 10);
   const taskName = (id: string) => tasks.find((t) => t.id === id)?.name ?? id.slice(0, 8);
