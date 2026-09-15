@@ -1,7 +1,7 @@
 use crate::db::{Db, ScheduleConfig, Task, TaskType};
 use crate::executor::Executor;
 use crate::scheduler::ControlCmd;
-use desirable::{Request, Response, Router};
+use desirable::{Middleware, Next, Request, Response, Result as DesirableResult, Router};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -102,6 +102,29 @@ fn build_task(body: CreateTaskRequest) -> Result<Task, String> {
     task.notify_type = notify_type;
     task.notify_url = notify_url;
     Ok(task)
+}
+
+/// 可选 Bearer 认证中间件:token 匹配才放行,否则 401。
+struct Auth {
+    token: String,
+}
+
+#[async_trait::async_trait]
+impl Middleware for Auth {
+    async fn handle(&self, req: Request, next: Next<'_>) -> DesirableResult {
+        let expected = format!("Bearer {}", self.token);
+        let authorized = req
+            .inner
+            .headers()
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v == expected);
+        if authorized {
+            next.run(req).await
+        } else {
+            Ok(err_msg(401, "unauthorized"))
+        }
+    }
 }
 
 pub fn build_router(
@@ -297,6 +320,13 @@ pub fn build_router(
             }
         }
     });
+
+    // 可选 Bearer 认证:设置 SCHEDULE_TOKEN 后全 API 要求携带,否则 401。
+    if let Ok(token) = std::env::var("SCHEDULE_TOKEN")
+        && !token.is_empty()
+    {
+        router.with(Auth { token });
+    }
 
     router
 }
