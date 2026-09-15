@@ -47,6 +47,8 @@ struct CreateTaskRequest {
     http_body: Option<String>,
     shell_cmd: Option<String>,
     enabled: Option<bool>,
+    notify_type: Option<String>,
+    notify_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -79,10 +81,26 @@ fn build_task(body: CreateTaskRequest) -> Result<Task, String> {
 
     schedule.validate()?;
 
+    let notify_type = body.notify_type.unwrap_or_else(|| "none".into());
+    let notify_url = body.notify_url.unwrap_or_default();
+    match notify_type.as_str() {
+        "none" => {}
+        "webhook" | "feishu" | "dingtalk" => {
+            if notify_url.trim().is_empty() {
+                return Err(format!(
+                    "notify_url is required when notify_type is {notify_type}"
+                ));
+            }
+        }
+        other => return Err(format!("invalid notify_type: {other}")),
+    }
+
     let mut task = Task::new(body.name, task_type, schedule);
     if let Some(enabled) = body.enabled {
         task.enabled = enabled;
     }
+    task.notify_type = notify_type;
+    task.notify_url = notify_url;
     Ok(task)
 }
 

@@ -69,6 +69,12 @@ struct AddArgs {
 
     #[arg(long)]
     cmd: Option<String>,
+
+    #[arg(long, default_value = "none")]
+    notify_type: String,
+
+    #[arg(long, default_value = "")]
+    notify_url: String,
 }
 
 #[derive(Args)]
@@ -123,6 +129,10 @@ struct CreateTaskBody {
     http_body: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     shell_cmd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notify_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notify_url: Option<String>,
 }
 
 async fn print_response(resp: reqwest::Response) -> Result<()> {
@@ -171,6 +181,8 @@ async fn main() -> Result<()> {
                     http_headers: headers_json,
                     http_body: args.body,
                     shell_cmd: args.cmd,
+                    notify_type: Some(args.notify_type),
+                    notify_url: Some(args.notify_url),
                 };
 
                 let resp = client
