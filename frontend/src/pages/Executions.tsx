@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { listExecutions, listTasks, type TaskExecution, type Task } from "@/api";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
+import { timeAgo } from "@/lib/time";
 import { RefreshCw, CheckCircle2, XCircle, Clock, PauseCircle, ChevronDown, ChevronUp, Inbox } from "lucide-react";
 
 const statusConfig: Record<string, { icon: typeof CheckCircle2; color: string; border: string }> = {
@@ -73,7 +74,7 @@ function ExecutionCard({ e, task }: { e: TaskExecution; task?: Task }) {
           </div>
 
           <div className="text-xs text-muted-foreground text-right whitespace-nowrap leading-relaxed tabular-nums">
-            <div>{fmtTime(e.started_at)}</div>
+            <div title={fmtTime(e.started_at)}>{timeAgo(e.started_at)}</div>
             {duration && <div className="text-muted-foreground/70">{duration}</div>}
           </div>
         </div>

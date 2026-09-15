@@ -4,6 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { listTasks, listExecutions, type Task, type TaskExecution } from "@/api";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
+import { timeAgo, fullTime } from "@/lib/time";
 import { ListTodo, Play, CheckCircle2, AlertCircle } from "lucide-react";
 
 export default function Dashboard() {
@@ -103,8 +104,8 @@ export default function Dashboard() {
                       <span className="text-muted-foreground truncate">{taskName(e.task_id)}</span>
                       {e.http_status && <span className="text-muted-foreground tabular-nums">HTTP {e.http_status}</span>}
                     </div>
-                    <span className="text-muted-foreground tabular-nums whitespace-nowrap pl-3">
-                      {new Date(e.started_at).toLocaleString()}
+                    <span className="text-muted-foreground tabular-nums whitespace-nowrap pl-3" title={fullTime(e.started_at)}>
+                      {timeAgo(e.started_at)}
                     </span>
                   </div>
                 );
