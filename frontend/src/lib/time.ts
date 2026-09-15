@@ -14,3 +14,15 @@ export function timeAgo(iso: string): string {
 export function fullTime(iso: string): string {
   return new Date(iso).toLocaleString();
 }
+
+/** 未来时间格式化:now / in 5m / in 3h / in 2d。 */
+export function timeUntil(iso: string): string {
+  const seconds = Math.floor((new Date(iso).getTime() - Date.now()) / 1000);
+  if (seconds <= 0) return "now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 1) return "in <1m";
+  if (minutes < 60) return `in ${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `in ${hours}h`;
+  return `in ${Math.floor(hours / 24)}d`;
+}

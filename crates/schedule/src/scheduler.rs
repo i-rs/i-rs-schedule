@@ -31,7 +31,8 @@ impl Scheduler {
 
     pub fn load_tasks(&mut self, tasks: Vec<Task>) {
         for task in tasks {
-            match task.schedule.remaining_delay(&task.created_at) {
+            let tz = crate::schedule::parse_timezone(&task.timezone);
+            match task.schedule.remaining_delay(&task.created_at, tz) {
                 Some(delay) => {
                     let key = self.queue.insert(task.clone(), delay);
                     self.keys.insert(task.id.clone(), key);
@@ -48,7 +49,8 @@ impl Scheduler {
     }
 
     pub fn insert(&mut self, task: Task) {
-        let delay = task.schedule.next_delay();
+        let tz = crate::schedule::parse_timezone(&task.timezone);
+        let delay = task.schedule.next_delay(tz);
         let key = self.queue.insert(task.clone(), delay);
         self.keys.insert(task.id.clone(), key);
     }
@@ -82,7 +84,8 @@ impl Scheduler {
                             self.keys.remove(&task.id);
                         }
                         ScheduleConfig::Cron { .. } => {
-                            let next = task.schedule.next_delay();
+                            let tz = crate::schedule::parse_timezone(&task.timezone);
+                            let next = task.schedule.next_delay(tz);
                             let key = self.queue.insert(task.clone(), next);
                             self.keys.insert(task.id.clone(), key);
                         }

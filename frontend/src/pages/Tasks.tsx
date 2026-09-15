@@ -12,7 +12,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, runTask, type Task } from "@/api";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
-import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap, Loader2, Copy, Check, Bell } from "lucide-react";
+import { timeUntil } from "@/lib/time";
+import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap, Loader2, Copy, Check, Bell, AlarmClock } from "lucide-react";
 
 interface TaskForm {
   name: string;
@@ -24,6 +25,7 @@ interface TaskForm {
   http_url: string;
   http_body: string;
   shell_cmd: string;
+  timezone: string;
   notify_type: "none" | "webhook" | "feishu" | "dingtalk";
   notify_url: string;
 }
@@ -38,6 +40,7 @@ const emptyForm: TaskForm = {
   http_url: "",
   http_body: "",
   shell_cmd: "",
+  timezone: "UTC",
   notify_type: "none",
   notify_url: "",
 };
@@ -92,6 +95,7 @@ export default function Tasks() {
       ...(form.task_type === "http"
         ? { http_method: form.http_method, http_url: form.http_url, http_body: form.http_body || undefined }
         : { shell_cmd: form.shell_cmd }),
+      timezone: form.timezone,
       notify_type: form.notify_type,
       ...(form.notify_type !== "none" ? { notify_url: form.notify_url } : {}),
     };
@@ -128,6 +132,7 @@ export default function Tasks() {
       http_url: t.task_type.type === "http" ? t.task_type.url : "",
       http_body: t.task_type.type === "http" ? (t.task_type.body ?? "") : "",
       shell_cmd: t.task_type.type === "shell" ? t.task_type.cmd : "",
+      timezone: t.timezone || "UTC",
       notify_type: (t.notify_type as TaskForm["notify_type"]) || "none",
       notify_url: t.notify_url ?? "",
     });
@@ -249,6 +254,12 @@ export default function Tasks() {
                         <Clock className="mr-1 h-3 w-3" />
                         {t.schedule.type === "cron" ? t.schedule.expr : `${t.schedule.delay_secs}s`}
                       </Badge>
+                      {t.next_run_at && (
+                        <Badge variant="outline" className="text-[10px]">
+                          <AlarmClock className="mr-1 h-3 w-3" />
+                          {timeUntil(t.next_run_at)}
+                        </Badge>
+                      )}
                       {t.notify_type !== "none" && (
                         <Bell className="h-3 w-3 text-amber-400" />
                       )}
@@ -354,6 +365,19 @@ export default function Tasks() {
                           {p.label}
                         </button>
                       ))}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Label className="text-xs text-muted-foreground">Timezone</Label>
+                      <Select value={form.timezone} onValueChange={(v) => setForm({ ...form, timezone: v || "UTC" })}>
+                        <SelectTrigger className="w-44 h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {["UTC","Asia/Shanghai","Asia/Hong_Kong","Asia/Tokyo","Asia/Singapore","Europe/London","Europe/Berlin","America/New_York","America/Los_Angeles"].map((z) => (
+                            <SelectItem key={z} value={z}>{z}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <details className="text-xs text-muted-foreground">
                       <summary className="cursor-pointer hover:text-foreground">Cron reference</summary>

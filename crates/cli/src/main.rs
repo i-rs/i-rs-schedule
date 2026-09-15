@@ -77,6 +77,9 @@ struct AddArgs {
     #[arg(long)]
     cmd: Option<String>,
 
+    #[arg(long, default_value = "UTC")]
+    timezone: String,
+
     #[arg(long, default_value = "none")]
     notify_type: String,
 
@@ -136,6 +139,8 @@ struct CreateTaskBody {
     http_body: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     shell_cmd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    timezone: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     notify_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -200,6 +205,7 @@ async fn main() -> Result<()> {
                     http_headers: headers_json,
                     http_body: args.body,
                     shell_cmd: args.cmd,
+                    timezone: Some(args.timezone),
                     notify_type: Some(args.notify_type),
                     notify_url: Some(args.notify_url),
                 };

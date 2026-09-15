@@ -28,6 +28,7 @@ pub struct Task {
     pub task_type: TaskType,
     pub enabled: bool,
     pub schedule: ScheduleConfig,
+    pub timezone: String,
     #[serde(rename = "notify_type")]
     pub notify_type: String,
     #[serde(default)]
@@ -70,6 +71,7 @@ impl Task {
             task_type,
             enabled: true,
             schedule,
+            timezone: "UTC".to_string(),
             notify_type: "none".to_string(),
             notify_url: String::new(),
             created_at: now.clone(),
@@ -124,6 +126,7 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     let shell_cmd: Option<String> = row.get("shell_cmd")?;
     let created_at: String = row.get("created_at")?;
     let updated_at: String = row.get("updated_at")?;
+    let timezone: String = row.get("timezone")?;
     let notify_type: String = row.get("notify_type")?;
     let notify_url: String = row.get("notify_url")?;
 
@@ -154,6 +157,7 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         task_type,
         enabled,
         schedule,
+        timezone,
         notify_type,
         notify_url,
         created_at,
@@ -208,6 +212,7 @@ impl Db {
                 http_headers TEXT,
                 http_body   TEXT,
                 shell_cmd   TEXT,
+                timezone    TEXT NOT NULL DEFAULT 'UTC',
                 notify_type TEXT NOT NULL DEFAULT 'none',
                 notify_url  TEXT NOT NULL DEFAULT '',
                 created_at  TEXT NOT NULL DEFAULT (datetime('now')),
@@ -241,6 +246,13 @@ impl Db {
             let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
+        if !existing.iter().any(|c| c == "timezone") {
+            conn.execute(
+                "ALTER TABLE tasks ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'",
+                [],
+            )?;
+            tracing::info!("migrated tasks table: added timezone");
+        }
         if !existing.iter().any(|c| c == "notify_type") {
             conn.execute(
                 "ALTER TABLE tasks ADD COLUMN notify_type TEXT NOT NULL DEFAULT 'none'",
@@ -310,9 +322,9 @@ impl Db {
 
             conn.execute(
                 "INSERT INTO tasks (id, name, task_type, enabled, schedule_type, cron_expr, delay_secs,
-                 http_method, http_url, http_headers, http_body, shell_cmd, notify_type, notify_url,
-                 created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                 http_method, http_url, http_headers, http_body, shell_cmd, timezone, notify_type,
+                 notify_url, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
                 params![
                     task.id,
                     task.name,
@@ -326,6 +338,7 @@ impl Db {
                     headers,
                     body,
                     cmd.unwrap_or(""),
+                    task.timezone,
                     task.notify_type,
                     task.notify_url,
                     task.created_at,
@@ -407,7 +420,7 @@ impl Db {
             conn.execute(
                 "UPDATE tasks SET name=?1, task_type=?2, enabled=?3, schedule_type=?4, cron_expr=?5,
                  delay_secs=?6, http_method=?7, http_url=?8, http_headers=?9, http_body=?10,
-                 shell_cmd=?11, notify_type=?12, notify_url=?13, updated_at=?14 WHERE id=?15",
+                 shell_cmd=?11, timezone=?12, notify_type=?13, notify_url=?14, updated_at=?15 WHERE id=?16",
                 params![
                     task.name,
                     task_type_str,
@@ -420,6 +433,7 @@ impl Db {
                     headers,
                     body,
                     cmd.unwrap_or(""),
+                    task.timezone,
                     task.notify_type,
                     task.notify_url,
                     now,
