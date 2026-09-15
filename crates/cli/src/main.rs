@@ -16,6 +16,8 @@ struct Cli {
     command: Command,
 }
 
+// AddArgs 携带全部创建参数,与查询类子命令的变体大小差异是结构性的,非性能路径。
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Command {
     #[command(subcommand)]
@@ -25,6 +27,7 @@ enum Command {
     Exec(ExecCmd),
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum TaskCmd {
     Add(AddArgs),
