@@ -62,6 +62,7 @@ struct CreateTaskRequest {
     enabled: Option<bool>,
     timezone: Option<String>,
     timeout_secs: Option<u64>,
+    max_retries: Option<i64>,
     notify_type: Option<String>,
     notify_url: Option<String>,
 }
@@ -102,6 +103,10 @@ fn build_task(body: CreateTaskRequest) -> Result<Task, String> {
     if timeout_secs == 0 || timeout_secs > 3600 {
         return Err("timeout_secs must be between 1 and 3600".into());
     }
+    let max_retries = body.max_retries.unwrap_or(0);
+    if !(0..=10).contains(&max_retries) {
+        return Err("max_retries must be between 0 and 10".into());
+    }
 
     let notify_type = body.notify_type.unwrap_or_else(|| "none".into());
     let notify_url = body.notify_url.unwrap_or_default();
@@ -125,6 +130,7 @@ fn build_task(body: CreateTaskRequest) -> Result<Task, String> {
     task.notify_url = notify_url;
     task.timezone = timezone;
     task.timeout_secs = timeout_secs;
+    task.max_retries = max_retries;
     Ok(task)
 }
 

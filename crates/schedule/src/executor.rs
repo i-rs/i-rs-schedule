@@ -48,6 +48,43 @@ impl Executor {
     /// create_execution 失败时返回一个内存构造的 `status="skipped"` 记录(不入库),
     /// 并打 warn 日志;execute 与 update_execution 的失败均告警但不影响返回。
     pub async fn execute_and_record(&self, db: &Db, task: &Task) -> TaskExecution {
+        let mut attempt: i64 = 0;
+        let (mut final_exec, mut duration_ms) = self.execute_attempt(db, task, attempt).await;
+        // 失败且还有重试额度:指数退避后重试(30s 起步,封顶 8 分钟)。
+        while final_exec.status == "failure" && attempt < task.max_retries {
+            let backoff = Duration::from_secs((30u64 << attempt.min(4)).min(480));
+            tracing::warn!(
+                task_id = %task.id,
+                attempt,
+                backoff_secs = backoff.as_secs(),
+                "attempt failed; retrying"
+            );
+            tokio::time::sleep(backoff).await;
+            attempt += 1;
+            let (exec, ms) = self.execute_attempt(db, task, attempt).await;
+            final_exec = exec;
+            duration_ms = ms;
+        }
+
+        // 通知只看最终结果:失败必推;成功且上一次为失败/中断时推送恢复。
+        if task.notify_type != "none" {
+            if final_exec.status == "failure" {
+                self.notifier
+                    .send(task, "task_failure", "任务失败", &final_exec, duration_ms);
+            } else if final_exec.status == "success"
+                && let Ok(Some(prev)) = db.get_previous_execution(&task.id, &final_exec.id).await
+                && (prev.status == "failure" || prev.status == "interrupted")
+            {
+                self.notifier
+                    .send(task, "task_recovery", "任务恢复", &final_exec, duration_ms);
+            }
+        }
+
+        final_exec
+    }
+
+    /// 执行单次尝试并落库,返回(记录, 本次耗时)。
+    async fn execute_attempt(&self, db: &Db, task: &Task, attempt: i64) -> (TaskExecution, u64) {
         let exec_id = uuid::Uuid::new_v4().to_string();
         let started_at = crate::db::now_iso();
         let start = std::time::Instant::now();
@@ -55,6 +92,7 @@ impl Executor {
         let running = TaskExecution {
             id: exec_id.clone(),
             task_id: task.id.clone(),
+            attempt,
             status: "running".to_string(),
             output: None,
             http_status: None,
@@ -68,14 +106,20 @@ impl Executor {
                 task_id = %task.id,
                 "create execution failed; skipping run"
             );
-            return TaskExecution {
+            let skipped = TaskExecution {
                 status: "skipped".to_string(),
                 finished_at: Some(crate::db::now_iso()),
                 ..running
             };
+            return (skipped, 0);
         }
 
-        tracing::info!(task_id = %task.id, exec_id = %exec_id, "execution started");
+        tracing::info!(
+            task_id = %task.id,
+            exec_id = %exec_id,
+            attempt,
+            "execution started"
+        );
 
         let result = self.execute(task).await;
 
@@ -91,37 +135,24 @@ impl Executor {
             );
         }
 
+        let duration_ms = start.elapsed().as_millis() as u64;
+
         tracing::info!(
             task_id = %task.id,
             exec_id = %exec_id,
             status = %result.status,
-            duration_ms = start.elapsed().as_millis() as u64,
+            duration_ms,
             "execution finished"
         );
 
         let duration_ms = start.elapsed().as_millis() as u64;
-        let final_exec = db
+        let exec = db
             .get_execution(&exec_id)
             .await
             .ok()
             .flatten()
             .unwrap_or(running);
-
-        // 通知:失败必推;成功且上一次为失败/中断时推送恢复。
-        if task.notify_type != "none" {
-            if final_exec.status == "failure" {
-                self.notifier
-                    .send(task, "task_failure", "任务失败", &final_exec, duration_ms);
-            } else if final_exec.status == "success"
-                && let Ok(Some(prev)) = db.get_previous_execution(&task.id, &exec_id).await
-                && (prev.status == "failure" || prev.status == "interrupted")
-            {
-                self.notifier
-                    .send(task, "task_recovery", "任务恢复", &final_exec, duration_ms);
-            }
-        }
-
-        final_exec
+        (exec, duration_ms)
     }
 
     async fn execute_http(
