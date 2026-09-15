@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -332,13 +333,24 @@ export default function Tasks() {
                 </div>
                 <div className="space-y-1.5">
                   <Label>Body (optional)</Label>
-                  <Input value={form.http_body} onChange={(e) => setForm({ ...form, http_body: e.target.value })} placeholder='{"key": "value"}' />
+                  <Textarea
+                    value={form.http_body}
+                    onChange={(e) => setForm({ ...form, http_body: e.target.value })}
+                    placeholder={'{\n  "key": "value"\n}'}
+                    className="font-mono min-h-[80px]"
+                  />
                 </div>
               </>
             ) : (
               <div className="space-y-1.5">
                 <Label>Command</Label>
-                <Input value={form.shell_cmd} onChange={(e) => setForm({ ...form, shell_cmd: e.target.value })} placeholder="echo hello" />
+                <Textarea
+                  value={form.shell_cmd}
+                  onChange={(e) => setForm({ ...form, shell_cmd: e.target.value })}
+                  placeholder="echo hello"
+                  className="font-mono min-h-[64px]"
+                  rows={2}
+                />
               </div>
             )}
           </div>
