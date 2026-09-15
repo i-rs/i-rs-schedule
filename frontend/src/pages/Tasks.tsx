@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, runTask, type Task } from "@/api";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
-import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap } from "lucide-react";
+import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap, Loader2 } from "lucide-react";
 
 interface TaskForm {
   name: string;
@@ -55,6 +55,7 @@ export default function Tasks() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
+  const [runningId, setRunningId] = useState<string | null>(null);
 
   useEffect(() => {
     if (error) toast.error(`Failed to load tasks: ${error.message}`);
@@ -138,6 +139,20 @@ export default function Tasks() {
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // Run 是同步请求(等待执行完成),需要按任务粒度的 loading 反馈。
+  const runTaskNow = async (id: string) => {
+    setRunningId(id);
+    try {
+      await runTask(id);
+      toast.success("Task triggered");
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunningId(null);
     }
   };
 
@@ -225,8 +240,14 @@ export default function Tasks() {
                         <Play className="h-4 w-4" />
                       </Button>
                     )}
-                    <Button size="icon-sm" variant="ghost" title="Run Now" onClick={() => act(() => runTask(t.id), "Task triggered")}>
-                      <Zap className="h-4 w-4" />
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      title={runningId === t.id ? "Running..." : "Run Now"}
+                      disabled={runningId === t.id}
+                      onClick={() => runTaskNow(t.id)}
+                    >
+                      {runningId === t.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
                     </Button>
                     <Button size="icon-sm" variant="ghost" title="Edit" onClick={() => openEdit(t)}>
                       <Pencil className="h-4 w-4" />
