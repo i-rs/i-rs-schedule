@@ -637,6 +637,31 @@ impl Db {
         .await
     }
 
+    /// 执行统计(供 /metrics):总数、成功数、失败数、启用任务数。
+    pub async fn stats(&self) -> anyhow::Result<(i64, i64, i64, i64)> {
+        let pool = self.pool.clone();
+        spawn_db(pool, move |conn| {
+            let total: i64 =
+                conn.query_row("SELECT COUNT(*) FROM task_executions", [], |r| r.get(0))?;
+            let success: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM task_executions WHERE status = 'success'",
+                [],
+                |r| r.get(0),
+            )?;
+            let failure: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM task_executions WHERE status = 'failure'",
+                [],
+                |r| r.get(0),
+            )?;
+            let enabled: i64 =
+                conn.query_row("SELECT COUNT(*) FROM tasks WHERE enabled = 1", [], |r| {
+                    r.get(0)
+                })?;
+            Ok((total, success, failure, enabled))
+        })
+        .await
+    }
+
     /// 删除早于 cutoff 的执行记录,返回删除行数。
     pub async fn purge_executions_older_than(&self, cutoff_iso: String) -> anyhow::Result<u64> {
         let pool = self.pool.clone();

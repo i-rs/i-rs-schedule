@@ -90,6 +90,13 @@ i-rs-cli task list
 i-rs-cli task rm --id <uuid>
 ```
 
+## Docker
+
+```bash
+docker compose up -d --build
+# API on http://localhost:3000, data persisted in the scheduler-data volume
+```
+
 ## Environment Variables
 
 | Variable | Default | Description |

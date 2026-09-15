@@ -354,6 +354,41 @@ pub fn build_router(
         }
     });
 
+    // 健康检查:不认证、不查库,探活专用。
+    {
+        router.get("/healthz", move |_req: Request| async move {
+            ok(serde_json::json!({ "status": "ok" }))
+        });
+    }
+
+    // Prometheus 指标(文本 exposition 格式)。
+    {
+        let db_metrics = db.clone();
+        router.get("/metrics", move |_req: Request| {
+            let db = db_metrics.clone();
+            async move {
+                let (total, success, failure, enabled) = db.stats().await.unwrap_or((0, 0, 0, 0));
+                let body = format!(
+                    "# HELP irs_executions_total Total number of task executions recorded.\n\
+                     # TYPE irs_executions_total counter\n\
+                     irs_executions_total {total}\n\
+                     # HELP irs_executions_success_total Successful task executions.\n\
+                     # TYPE irs_executions_success_total counter\n\
+                     irs_executions_success_total {success}\n\
+                     # HELP irs_executions_failure_total Failed task executions.\n\
+                     # TYPE irs_executions_failure_total counter\n\
+                     irs_executions_failure_total {failure}\n\
+                     # HELP irs_tasks_enabled Currently enabled tasks.\n\
+                     # TYPE irs_tasks_enabled gauge\n\
+                     irs_tasks_enabled {enabled}\n"
+                );
+                // body 为纯文本 String,with_status 实际不会失败(与 err_msg 的 unwrap 同理)。
+                let resp: Response = Response::with_status(200, body).unwrap();
+                Ok::<Response, Response>(resp)
+            }
+        });
+    }
+
     // 导出:全部任务(不含执行历史)。
     {
         let db_export = db.clone();

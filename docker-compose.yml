@@ -1,0 +1,19 @@
+services:
+  scheduler:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - scheduler-data:/data
+    environment:
+      # 设置后全 API 要求 Bearer 认证
+      # SCHEDULE_TOKEN: change-me
+      RETENTION_DAYS: "30"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  scheduler-data:
