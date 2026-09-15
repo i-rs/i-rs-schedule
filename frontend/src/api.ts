@@ -4,6 +4,8 @@ export interface Task {
   task_type: { type: "http"; method: string; url: string; headers: unknown; body: string | null } | { type: "shell"; cmd: string };
   enabled: boolean;
   schedule: { type: "cron"; expr: string } | { type: "once"; delay_secs: number };
+  notify_type: string;
+  notify_url: string;
   created_at: string;
   updated_at: string;
 }
@@ -55,6 +57,8 @@ export interface CreateTaskPayload {
   http_headers?: unknown;
   http_body?: string;
   shell_cmd?: string;
+  notify_type?: string;
+  notify_url?: string;
 }
 
 export async function createTask(data: CreateTaskPayload): Promise<Task> {

@@ -1,4 +1,5 @@
 use crate::db::{Db, Task, TaskExecution, TaskType};
+use crate::notify::Notifier;
 use std::time::Duration;
 
 pub struct ExecutionResult {
@@ -9,6 +10,7 @@ pub struct ExecutionResult {
 
 pub struct Executor {
     client: reqwest::Client,
+    notifier: Notifier,
 }
 
 impl Executor {
@@ -17,7 +19,10 @@ impl Executor {
             .timeout(Duration::from_secs(30))
             .build()
             .expect("failed to build reqwest client");
-        Self { client }
+        Self {
+            client,
+            notifier: Notifier::new(),
+        }
     }
 
     pub async fn execute(&self, task: &Task) -> ExecutionResult {
@@ -92,11 +97,29 @@ impl Executor {
             "execution finished"
         );
 
-        db.get_execution(&exec_id)
+        let duration_ms = start.elapsed().as_millis() as u64;
+        let final_exec = db
+            .get_execution(&exec_id)
             .await
             .ok()
             .flatten()
-            .unwrap_or(running)
+            .unwrap_or(running);
+
+        // 通知:失败必推;成功且上一次为失败/中断时推送恢复。
+        if task.notify_type != "none" {
+            if final_exec.status == "failure" {
+                self.notifier
+                    .send(task, "task_failure", "任务失败", &final_exec, duration_ms);
+            } else if final_exec.status == "success"
+                && let Ok(Some(prev)) = db.get_previous_execution(&task.id, &exec_id).await
+                && (prev.status == "failure" || prev.status == "interrupted")
+            {
+                self.notifier
+                    .send(task, "task_recovery", "任务恢复", &final_exec, duration_ms);
+            }
+        }
+
+        final_exec
     }
 
     async fn execute_http(
