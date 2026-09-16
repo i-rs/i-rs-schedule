@@ -428,6 +428,27 @@ pub fn build_router(
         });
     }
 
+    // 单任务执行统计(详情抽屉用)。
+    {
+        let db_tstats = db.clone();
+        router.get("/api/tasks/:id/stats", move |req: Request| {
+            let db = db_tstats.clone();
+            async move {
+                let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
+                let (total, success, failure, avg_ms) = db
+                    .task_stats(&id)
+                    .await
+                    .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                ok(serde_json::json!({
+                    "total": total,
+                    "success": success,
+                    "failure": failure,
+                    "avg_duration_ms": avg_ms.map(|v| (v * 10.0).round() / 10.0),
+                }))
+            }
+        });
+    }
+
     // 近 14 天每日执行统计(success/failure),供 Dashboard 图表。
     {
         let db_daily = db.clone();

@@ -676,6 +676,33 @@ impl Db {
         .await
     }
 
+    /// 单任务执行统计:总数、成功数、失败数、平均耗时(毫秒,未完成的不计入)。
+    pub async fn task_stats(&self, task_id: &str) -> anyhow::Result<(i64, i64, i64, Option<f64>)> {
+        let pool = self.pool.clone();
+        let task_id = task_id.to_string();
+        spawn_db(pool, move |conn| {
+            let row = conn.query_row(
+                "SELECT COUNT(*),
+                        SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN status = 'failure' THEN 1 ELSE 0 END),
+                        AVG(CASE WHEN finished_at IS NOT NULL
+                                 THEN (julianday(finished_at) - julianday(started_at)) * 86400000 END)
+                 FROM task_executions WHERE task_id = ?1",
+                params![task_id],
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                        r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                        r.get::<_, Option<f64>>(3)?,
+                    ))
+                },
+            )?;
+            Ok(row)
+        })
+        .await
+    }
+
     /// 近 N 天每日执行统计:(day, success, failure),按日升序。缺失日由调用方补零。
     pub async fn daily_stats(&self, cutoff_day: String) -> anyhow::Result<Vec<(String, i64, i64)>> {
         let pool = self.pool.clone();

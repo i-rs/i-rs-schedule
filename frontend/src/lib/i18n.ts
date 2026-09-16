@@ -104,6 +104,8 @@ const zh: Record<string, string> = {
   Output: "输出",
   "(no output)": "(无输出)",
   "attempt {n}": "第 {n} 次尝试",
+  "Total runs": "总执行",
+  "Avg duration": "平均耗时",
   // 仪表盘
   "Total Tasks": "任务总数",
   "Recent Executions": "最近执行",
