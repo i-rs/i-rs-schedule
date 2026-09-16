@@ -161,3 +161,10 @@ export async function getTaskStats(id: string): Promise<TaskStats> {
 export async function listTaskExecutions(id: string, limit = 20): Promise<TaskExecution[]> {
   return request<TaskExecution[]>(`/api/executions?task_id=${id}&limit=${limit}`);
 }
+
+export async function cronPreview(expr: string, timezone: string): Promise<{ times: string[] }> {
+  return request<{ times: string[] }>("/api/cron/preview", {
+    method: "POST",
+    body: JSON.stringify({ expr, timezone }),
+  });
+}

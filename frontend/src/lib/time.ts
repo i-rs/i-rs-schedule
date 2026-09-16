@@ -41,3 +41,20 @@ export function timeUntil(iso: string): string {
 export function fullTime(iso: string): string {
   return new Date(iso).toLocaleString();
 }
+
+/** 按指定 IANA 时区格式化:"MM-DD HH:mm:ss"。 */
+export function formatInTz(iso: string, tz: string): string {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      timeZone: tz,
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  } catch {
+    return iso;
+  }
+}
