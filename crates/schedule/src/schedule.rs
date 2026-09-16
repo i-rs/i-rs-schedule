@@ -115,3 +115,96 @@ pub fn next_run_at(task: &Task) -> Option<String> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{ScheduleConfig, TaskType};
+
+    fn task(schedule: ScheduleConfig, timezone: &str, enabled: bool) -> Task {
+        Task {
+            id: "t1".into(),
+            name: "test".into(),
+            task_type: TaskType::Shell { cmd: "echo".into() },
+            enabled,
+            schedule,
+            timezone: timezone.into(),
+            timeout_secs: 30,
+            max_retries: 0,
+            notify_type: "none".into(),
+            notify_url: String::new(),
+            created_at: crate::db::now_iso(),
+            updated_at: crate::db::now_iso(),
+        }
+    }
+
+    #[test]
+    fn shanghai_9am_is_1am_utc() {
+        // 上海时区的"每天 9 点"对应的下次触发应为 UTC 01:00
+        let t = task(
+            ScheduleConfig::Cron {
+                expr: "0 0 9 * * *".into(),
+            },
+            "Asia/Shanghai",
+            true,
+        );
+        let next = next_run_at(&t).unwrap();
+        assert_eq!(next.get(11..13).unwrap(), "01");
+    }
+
+    #[test]
+    fn utc_9am_is_9am_utc() {
+        let t = task(
+            ScheduleConfig::Cron {
+                expr: "0 0 9 * * *".into(),
+            },
+            "UTC",
+            true,
+        );
+        let next = next_run_at(&t).unwrap();
+        assert_eq!(next.get(11..13).unwrap(), "09");
+    }
+
+    #[test]
+    fn invalid_timezone_falls_back_to_utc() {
+        assert_eq!(parse_timezone("Mars/Olympus"), chrono_tz::UTC);
+    }
+
+    #[test]
+    fn validate_timezone_rejects_garbage() {
+        assert!(validate_timezone("Asia/Shanghai").is_ok());
+        assert!(validate_timezone("not-a-zone").is_err());
+    }
+
+    #[test]
+    fn cron_validate_rejects_bad_expr() {
+        assert!(
+            ScheduleConfig::Cron {
+                expr: "0 0 9 * * *".into()
+            }
+            .validate()
+            .is_ok()
+        );
+        assert!(
+            ScheduleConfig::Cron {
+                expr: "garbage".into()
+            }
+            .validate()
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn next_run_at_respects_disabled_and_expired_once() {
+        let mut t = task(ScheduleConfig::Once { delay_secs: 60 }, "UTC", true);
+        // created_at 刚生成,delay 60s → 未来
+        assert!(next_run_at(&t).is_some());
+        // disabled → None
+        t.enabled = false;
+        assert!(next_run_at(&t).is_none());
+        // once 已过期 → None
+        t.enabled = true;
+        t.created_at = "2020-01-01T00:00:00.000Z".into();
+        assert!(next_run_at(&t).is_none());
+    }
+}

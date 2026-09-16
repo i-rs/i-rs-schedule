@@ -161,6 +161,7 @@ pub fn build_router(
     db: Db,
     cmd_tx: mpsc::UnboundedSender<ControlCmd>,
     executor: Arc<Executor>,
+    auth_token: Option<String>,
 ) -> Router {
     let db = Arc::new(db);
     let cmd_tx = Arc::new(cmd_tx);
@@ -437,8 +438,8 @@ pub fn build_router(
         });
     }
 
-    // 可选 Bearer 认证:设置 SCHEDULE_TOKEN 后全 API 要求携带,否则 401。
-    if let Ok(token) = std::env::var("SCHEDULE_TOKEN")
+    // 可选 Bearer 认证:配置了 token(环境变量或 config.toml)则全 API 要求携带。
+    if let Some(token) = auth_token
         && !token.is_empty()
     {
         router.with(Auth { token });

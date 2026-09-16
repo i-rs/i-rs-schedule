@@ -90,6 +90,17 @@ i-rs-cli task list
 i-rs-cli task rm --id <uuid>
 ```
 
+## Configuration
+
+Environment variables (below) take precedence over an optional `config.toml` in the working directory:
+
+```toml
+db_path = "./data/schedule.db"
+port = 3000
+# token = "change-me"      # enables Bearer auth when set
+retention_days = 30         # execution history retention, 0 = keep forever
+```
+
 ## Docker
 
 ```bash
