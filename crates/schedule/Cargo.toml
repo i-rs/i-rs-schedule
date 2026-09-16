@@ -1,6 +1,6 @@
 [package]
 name = "i-rs-schedule"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 
 [dependencies]
@@ -22,4 +22,6 @@ r2d2 = "0.8"
 r2d2_sqlite = "0.35"
 async-trait = "0.1"
 toml = "0.8"
+sha2 = "0.10"
+rand = "0.9"
 chrono-tz = "0.10"

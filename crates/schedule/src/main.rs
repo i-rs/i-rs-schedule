@@ -42,7 +42,19 @@ async fn main() -> anyhow::Result<()> {
     let mut scheduler = Scheduler::new();
     scheduler.load_tasks(tasks);
 
-    let executor = Arc::new(Executor::new());
+    // 管理员账号(可选):配置了即启用登录
+    if let (Some(user), Some(pass)) = (config.admin_user.clone(), config.admin_password.clone()) {
+        db.seed_admin(&user, &pass).await?;
+        tracing::info!("admin user seeded: {user}");
+    }
+    let has_admin = config.admin_user.is_some() && config.admin_password.is_some();
+
+    // 全局通知渠道(任务未配置时的回落)
+    let global_notify = match (config.notify_type.clone(), config.notify_url.clone()) {
+        (Some(t), Some(u)) if !u.is_empty() => Some((t, u)),
+        _ => None,
+    };
+    let executor = Arc::new(Executor::new(global_notify));
     let scheduler_db = db.clone();
     let api_executor = executor.clone();
 
@@ -51,7 +63,15 @@ async fn main() -> anyhow::Result<()> {
         scheduler.run(cmd_rx, executor, scheduler_db).await;
     });
 
-    let router = api::build_router(db, cmd_tx.clone(), api_executor, config.token.clone());
+    let router = api::build_router(
+        db,
+        cmd_tx.clone(),
+        api_executor,
+        api::AuthSettings {
+            static_token: config.token.clone(),
+            has_admin,
+        },
+    );
 
     tracing::info!("starting server on http://{addr}");
 

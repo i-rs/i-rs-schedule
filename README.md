@@ -97,8 +97,12 @@ Environment variables (below) take precedence over an optional `config.toml` in 
 ```toml
 db_path = "./data/schedule.db"
 port = 3000
-# token = "change-me"      # enables Bearer auth when set
-retention_days = 30         # execution history retention, 0 = keep forever
+# token = "change-me"          # enables Bearer auth when set
+retention_days = 30             # execution history retention, 0 = keep forever
+# admin_user = "admin"          # enables the login dialog when set (with admin_password)
+# admin_password = "change-me"
+# notify_type = "feishu"        # global notification fallback (feishu/dingtalk/webhook)
+# notify_url = "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
 ```
 
 ## Docker

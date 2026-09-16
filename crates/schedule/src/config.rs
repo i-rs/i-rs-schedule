@@ -8,6 +8,10 @@ pub struct FileConfig {
     pub port: Option<u16>,
     pub token: Option<String>,
     pub retention_days: Option<i64>,
+    pub admin_user: Option<String>,
+    pub admin_password: Option<String>,
+    pub notify_type: Option<String>,
+    pub notify_url: Option<String>,
 }
 
 impl FileConfig {
@@ -34,6 +38,10 @@ pub struct Config {
     pub port: u16,
     pub token: Option<String>,
     pub retention_days: i64,
+    pub admin_user: Option<String>,
+    pub admin_password: Option<String>,
+    pub notify_type: Option<String>,
+    pub notify_url: Option<String>,
 }
 
 impl Config {
@@ -53,12 +61,22 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .or(file.retention_days)
             .unwrap_or(30);
+        let admin_user = env("ADMIN_USER").or(file.admin_user);
+        let admin_password = env("ADMIN_PASSWORD").or(file.admin_password);
+        let notify_type = env("NOTIFY_TYPE")
+            .or(file.notify_type)
+            .filter(|v| v != "none");
+        let notify_url = env("NOTIFY_URL").or(file.notify_url);
 
         Self {
             db_path,
             port,
             token,
             retention_days,
+            admin_user,
+            admin_password,
+            notify_type,
+            notify_url,
         }
     }
 

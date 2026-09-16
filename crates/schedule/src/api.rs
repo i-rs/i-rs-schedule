@@ -150,26 +150,54 @@ fn build_task_with_hint(body: CreateTaskRequest, id_hint: String) -> Result<Task
     Ok(task)
 }
 
-/// 可选 Bearer 认证中间件:token 匹配才放行,否则 401。
+/// 认证设置:静态机器 token 与管理员账号(有其一则启用认证)。
+#[derive(Debug, Clone, Default)]
+pub struct AuthSettings {
+    pub static_token: Option<String>,
+    pub has_admin: bool,
+}
+
+/// Bearer 认证中间件:静态 token / 会话 / API token 任一匹配即放行;
+/// /healthz 与 /metrics 豁免(探活与抓取不应依赖凭据)。
 struct Auth {
-    token: String,
+    static_token: Option<String>,
+    has_admin: bool,
+    db: std::sync::Arc<Db>,
 }
 
 #[async_trait::async_trait]
 impl Middleware for Auth {
     async fn handle(&self, req: Request, next: Next<'_>) -> DesirableResult {
-        let expected = format!("Bearer {}", self.token);
-        let authorized = req
+        // 探活、指标与登录端点豁免(登录是获取凭据的入口)
+        if req.path().starts_with("/healthz")
+            || req.path().starts_with("/metrics")
+            || req.path().starts_with("/api/auth/login")
+        {
+            return next.run(req).await;
+        }
+        if self.static_token.is_none() && !self.has_admin {
+            // 开放模式:未配置任何认证
+            return next.run(req).await;
+        }
+        let bearer = req
             .inner
             .headers()
             .get("authorization")
             .and_then(|v| v.to_str().ok())
-            .is_some_and(|v| v == expected);
-        if authorized {
-            next.run(req).await
-        } else {
-            Ok(err_msg(401, "unauthorized"))
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .map(|v| v.to_string());
+        if let Some(token) = bearer {
+            if self.static_token.as_deref() == Some(token.as_str()) {
+                return next.run(req).await;
+            }
+            if self.db.session_valid(&token).await.unwrap_or(false) {
+                return next.run(req).await;
+            }
+            if self.db.api_token_valid(&token).await.unwrap_or(false) {
+                return next.run(req).await;
+            }
         }
+        Ok(err_msg(401, "unauthorized"))
     }
 }
 
@@ -205,7 +233,7 @@ pub fn build_router(
     db: Db,
     cmd_tx: mpsc::UnboundedSender<ControlCmd>,
     executor: Arc<Executor>,
-    auth_token: Option<String>,
+    auth: AuthSettings,
 ) -> Router {
     let db = Arc::new(db);
     let cmd_tx = Arc::new(cmd_tx);
@@ -229,6 +257,9 @@ pub fn build_router(
             db.create_task(&task)
                 .await
                 .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+            let _ = db
+                .audit("task.create", &format!("created task {}", task.name))
+                .await;
             let _ = tx.send(ControlCmd::Add(task.clone()));
             ok(with_next(task))
         }
@@ -285,6 +316,9 @@ pub fn build_router(
             db.update_task(&task)
                 .await
                 .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+            let _ = db
+                .audit("task.update", &format!("updated task {}", task.name))
+                .await;
             let _ = tx.send(ControlCmd::Update(task.clone()));
             ok(with_next(task))
         }
@@ -303,6 +337,7 @@ pub fn build_router(
                 .map_err(|e| err_msg(500, format!("db error: {e}")))?
             {
                 true => {
+                    let _ = db.audit("task.delete", &format!("deleted task {id}")).await;
                     let _ = tx.send(ControlCmd::Remove(id));
                     ok(serde_json::json!({ "deleted": true }))
                 }
@@ -369,6 +404,9 @@ pub fn build_router(
                 .ok_or_else(|| err_msg(404, "not found"))?;
 
             let exec_record = exec.execute_and_record(&db, &task).await;
+            let _ = db
+                .audit("task.run", &format!("manually ran task {}", task.name))
+                .await;
             ok(exec_record)
         }
     });
@@ -490,7 +528,15 @@ pub fn build_router(
                 };
                 match executor
                     .notifier()
-                    .send_sync(&task, "test", "测试通知", &test_exec, 0)
+                    .send_sync_channel(
+                        &task.notify_type,
+                        &task.notify_url,
+                        &task,
+                        "test",
+                        "测试通知",
+                        &test_exec,
+                        0,
+                    )
                     .await
                 {
                     Ok(()) => ok(serde_json::json!({ "delivered": true, "detail": "notification delivered" })),
@@ -616,11 +662,137 @@ pub fn build_router(
         });
     }
 
-    // 可选 Bearer 认证:配置了 token(环境变量或 config.toml)则全 API 要求携带。
-    if let Some(token) = auth_token
-        && !token.is_empty()
+    // 可选认证:配置了静态 token 或管理员账号才启用。
+    if auth.static_token.is_some() || auth.has_admin {
+        router.with(Auth {
+            static_token: auth.static_token,
+            has_admin: auth.has_admin,
+            db: db.clone(),
+        });
+    }
+
+    // 登录:校验管理员账密,签发 30 天会话 token。
+    if auth.has_admin {
+        let db_login = db.clone();
+        router.post("/api/auth/login", move |mut req: Request| {
+            let db = db_login.clone();
+            async move {
+                #[derive(Deserialize)]
+                struct LoginBody {
+                    username: String,
+                    password: String,
+                }
+                let body: LoginBody = req
+                    .body()
+                    .await
+                    .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
+                if !db
+                    .verify_admin(&body.username, &body.password)
+                    .await
+                    .unwrap_or(false)
+                {
+                    return Err(err_msg(401, "invalid credentials"));
+                }
+                let (token, expires_at) = db
+                    .create_session(30)
+                    .await
+                    .map_err(|e| err_msg(500, format!("session error: {e}")))?;
+                let _ = db
+                    .audit("login", &format!("user {} logged in", body.username))
+                    .await;
+                ok(serde_json::json!({ "token": token, "expires_at": expires_at }))
+            }
+        });
+    }
+
+    // Token 管理:列表 / 生成(明文仅返回一次)/ 吊销。
     {
-        router.with(Auth { token });
+        let db_list = db.clone();
+        router.get("/api/auth/tokens", move |_req: Request| {
+            let db = db_list.clone();
+            async move {
+                let rows = db
+                    .list_api_tokens()
+                    .await
+                    .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                let tokens: Vec<serde_json::Value> = rows
+                    .into_iter()
+                    .map(|(id, name, created_at)| {
+                        serde_json::json!({ "id": id, "name": name, "created_at": created_at })
+                    })
+                    .collect();
+                ok(tokens)
+            }
+        });
+
+        let db_create = db.clone();
+        router.post("/api/auth/tokens", move |mut req: Request| {
+            let db = db_create.clone();
+            async move {
+                #[derive(Deserialize)]
+                struct NewToken {
+                    name: String,
+                }
+                let body: NewToken = req
+                    .body()
+                    .await
+                    .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
+                let (id, name, token) = db
+                    .create_api_token(&body.name)
+                    .await
+                    .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                ok(serde_json::json!({ "id": id, "name": name, "token": token }))
+            }
+        });
+
+        let db_revoke = db.clone();
+        router.delete("/api/auth/tokens/:id", move |req: Request| {
+            let db = db_revoke.clone();
+            async move {
+                let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
+                let revoked = db
+                    .revoke_api_token(&id)
+                    .await
+                    .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                if revoked {
+                    ok(serde_json::json!({ "revoked": true }))
+                } else {
+                    Err(err_msg(404, "not found"))
+                }
+            }
+        });
+    }
+
+    // 审计日志查询。
+    // (limit 通过 query string 传入)
+    {
+        let db_audit = db.clone();
+        router.get("/api/audit", move |req: Request| {
+            let db = db_audit.clone();
+            async move {
+                #[derive(Deserialize)]
+                struct AuditQuery {
+                    limit: Option<i64>,
+                }
+                let limit: i64 = req
+                    .query::<AuditQuery>()
+                    .ok()
+                    .flatten()
+                    .and_then(|q| q.limit)
+                    .unwrap_or(100);
+                let rows = db
+                    .list_audit(limit)
+                    .await
+                    .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                let items: Vec<serde_json::Value> = rows
+                    .into_iter()
+                    .map(|(ts, action, summary)| {
+                        serde_json::json!({ "ts": ts, "action": action, "summary": summary })
+                    })
+                    .collect();
+                ok(items)
+            }
+        });
     }
 
     router

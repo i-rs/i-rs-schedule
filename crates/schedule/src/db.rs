@@ -255,6 +255,31 @@ impl Db {
                 FOREIGN KEY (task_id) REFERENCES tasks(id)
             );
 
+            CREATE TABLE IF NOT EXISTS users (
+                username      TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS sessions (
+                token_hash TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS api_tokens (
+                id         TEXT PRIMARY KEY,
+                name       TEXT NOT NULL,
+                token_hash TEXT UNIQUE NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id      TEXT PRIMARY KEY,
+                ts      TEXT NOT NULL,
+                action  TEXT NOT NULL,
+                summary TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_task_executions_task_id ON task_executions(task_id);
             CREATE INDEX IF NOT EXISTS idx_task_executions_started_at ON task_executions(started_at);
             ",
@@ -751,6 +776,170 @@ impl Db {
                 ))
             })?;
             rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+        })
+        .await
+    }
+
+    // ---- 认证相关 ----
+
+    pub fn sha256_hex(input: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(input.as_bytes());
+        format!("{:x}", hasher.finalize())
+    }
+
+    pub async fn seed_admin(&self, username: &str, password: &str) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let username = username.to_string();
+        let hash = Self::sha256_hex(password);
+        spawn_db(pool, move |conn| {
+            conn.execute(
+                "INSERT INTO users (username, password_hash) VALUES (?1, ?2)
+                 ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash",
+                params![username, hash],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn verify_admin(&self, username: &str, password: &str) -> anyhow::Result<bool> {
+        let pool = self.pool.clone();
+        let username = username.to_string();
+        let hash = Self::sha256_hex(password);
+        spawn_db(pool, move |conn| {
+            let stored: Option<String> = conn
+                .query_row(
+                    "SELECT password_hash FROM users WHERE username = ?1",
+                    params![username],
+                    |r| r.get(0),
+                )
+                .ok();
+            Ok(stored == Some(hash))
+        })
+        .await
+    }
+
+    pub async fn create_session(&self, ttl_days: i64) -> anyhow::Result<(String, String)> {
+        let pool = self.pool.clone();
+        spawn_db(pool, move |conn| {
+            use rand::RngCore;
+            let mut bytes = [0u8; 32];
+            rand::rng().fill_bytes(&mut bytes);
+            let token = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+            let token_hash = Self::sha256_hex(&token);
+            let now = now_iso();
+            let expires = (chrono::Utc::now() + chrono::Duration::days(ttl_days))
+                .format(TIMESTAMP_FMT)
+                .to_string();
+            conn.execute(
+                "INSERT INTO sessions (token_hash, created_at, expires_at) VALUES (?1, ?2, ?3)",
+                params![token_hash, now, expires],
+            )?;
+            Ok((token, expires))
+        })
+        .await
+    }
+
+    /// Bearer token 是否对应有效会话;顺带清理过期会话(惰性)。
+    pub async fn session_valid(&self, token: &str) -> anyhow::Result<bool> {
+        let pool = self.pool.clone();
+        let token_hash = Self::sha256_hex(token);
+        let now = now_iso();
+        spawn_db(pool, move |conn| {
+            conn.execute("DELETE FROM sessions WHERE expires_at < ?1", params![now])?;
+            let valid: Option<String> = conn
+                .query_row(
+                    "SELECT expires_at FROM sessions WHERE token_hash = ?1",
+                    params![token_hash],
+                    |r| r.get(0),
+                )
+                .ok();
+            Ok(valid.map(|e| e >= now).unwrap_or(false))
+        })
+        .await
+    }
+
+    pub async fn create_api_token(&self, name: &str) -> anyhow::Result<(String, String, String)> {
+        let pool = self.pool.clone();
+        let name = name.to_string();
+        spawn_db(pool, move |conn| {
+            use rand::RngCore;
+            let mut bytes = [0u8; 32];
+            rand::rng().fill_bytes(&mut bytes);
+            let token = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+            let token_hash = Self::sha256_hex(&token);
+            let id = uuid::Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO api_tokens (id, name, token_hash, created_at) VALUES (?1, ?2, ?3, ?4)",
+                params![id, name, token_hash, now_iso()],
+            )?;
+            Ok((id, name, token))
+        })
+        .await
+    }
+
+    pub async fn list_api_tokens(&self) -> anyhow::Result<Vec<(String, String, String)>> {
+        let pool = self.pool.clone();
+        spawn_db(pool, move |conn| {
+            let mut stmt = conn
+                .prepare("SELECT id, name, created_at FROM api_tokens ORDER BY created_at DESC")?;
+            let rows = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await
+    }
+
+    pub async fn revoke_api_token(&self, id: &str) -> anyhow::Result<bool> {
+        let pool = self.pool.clone();
+        let id = id.to_string();
+        spawn_db(pool, move |conn| {
+            let n = conn.execute("DELETE FROM api_tokens WHERE id = ?1", params![id])?;
+            Ok(n > 0)
+        })
+        .await
+    }
+
+    pub async fn api_token_valid(&self, token: &str) -> anyhow::Result<bool> {
+        let pool = self.pool.clone();
+        let token_hash = Self::sha256_hex(token);
+        spawn_db(pool, move |conn| {
+            let n: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM api_tokens WHERE token_hash = ?1",
+                params![token_hash],
+                |r| r.get(0),
+            )?;
+            Ok(n > 0)
+        })
+        .await
+    }
+
+    pub async fn audit(&self, action: &str, summary: &str) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let action = action.to_string();
+        let summary = summary.to_string();
+        spawn_db(pool, move |conn| {
+            conn.execute(
+                "INSERT INTO audit_log (id, ts, action, summary) VALUES (?1, ?2, ?3, ?4)",
+                params![uuid::Uuid::new_v4().to_string(), now_iso(), action, summary],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn list_audit(&self, limit: i64) -> anyhow::Result<Vec<(String, String, String)>> {
+        let pool = self.pool.clone();
+        spawn_db(pool, move |conn| {
+            let mut stmt = conn
+                .prepare("SELECT ts, action, summary FROM audit_log ORDER BY ts DESC LIMIT ?1")?;
+            let rows = stmt
+                .query_map(params![limit], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
         })
         .await
     }

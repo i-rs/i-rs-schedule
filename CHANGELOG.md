@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.7.0 「多人」(2026-09-16)
+
+从个人工具走向团队工具:登录、Token 管理、审计、全局通知。
+
+### 新增
+
+- **登录会话**:配置 `ADMIN_USER`/`ADMIN_PASSWORD`(或 config.toml 同名字段)后,`POST /api/auth/login` 用账密签发 30 天会话 token(sha256 哈希存储);前端 401 弹出登录对话框(也保留手动 token 输入)
+- **Token 管理界面**:设置对话框生成/吊销 API token(`api_tokens` 表,哈希存储,明文仅创建时显示一次)
+- **审计日志**:创建/更新/删除/运行/登录均记录(`audit_log` 表);`GET /api/audit`;设置对话框 Audit 标签页展示
+- **全局通知渠道**:`NOTIFY_TYPE`+`NOTIFY_URL`(或 config.toml)作为任务未配置通知时的回落
+
+### 变更
+
+- 认证中间件多源校验(静态 token / 会话 / API token);`/healthz`、`/metrics`、`/api/auth/login` 豁免认证
+- 未配置任何凭据时保持完全开放(本机模式,向后兼容)
+
+### 新增依赖
+
+- sha2、rand(密码与 token 哈希、随机 token 生成)
+
 ## v0.6.0 「编排补全」(2026-09-16)
 
 把成功触发链补全为完整轻编排。

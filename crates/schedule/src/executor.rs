@@ -27,6 +27,8 @@ pub struct ExecutionResult {
 pub struct Executor {
     client: reqwest::Client,
     notifier: Notifier,
+    /// 全局通知渠道(任务未配置时的回落):(notify_type, notify_url)
+    global_notify: Option<(String, String)>,
 }
 
 impl Executor {
@@ -35,7 +37,7 @@ impl Executor {
         &self.notifier
     }
 
-    pub fn new() -> Self {
+    pub fn new(global_notify: Option<(String, String)>) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
@@ -43,6 +45,7 @@ impl Executor {
         Self {
             client,
             notifier: Notifier::new(),
+            global_notify,
         }
     }
 
@@ -124,16 +127,39 @@ impl Executor {
         }
 
         // 通知只看最终结果:失败必推;成功且上一次为失败/中断时推送恢复。
-        if task.notify_type != "none" {
+        // 任务未配置渠道时回落到全局通知(若已配置)。
+        let (notify_type, notify_url) = if task.notify_type != "none" {
+            (task.notify_type.clone(), task.notify_url.clone())
+        } else {
+            match &self.global_notify {
+                Some((nt, nu)) => (nt.clone(), nu.clone()),
+                None => ("none".into(), String::new()),
+            }
+        };
+        if notify_type != "none" {
             if final_exec.status == "failure" {
-                self.notifier
-                    .send(task, "task_failure", "任务失败", &final_exec, duration_ms);
+                self.notifier.send_channel(
+                    &notify_type,
+                    &notify_url,
+                    task,
+                    "task_failure",
+                    "任务失败",
+                    &final_exec,
+                    duration_ms,
+                );
             } else if final_exec.status == "success"
                 && let Ok(Some(prev)) = db.get_previous_execution(&task.id, &final_exec.id).await
                 && (prev.status == "failure" || prev.status == "interrupted")
             {
-                self.notifier
-                    .send(task, "task_recovery", "任务恢复", &final_exec, duration_ms);
+                self.notifier.send_channel(
+                    &notify_type,
+                    &notify_url,
+                    task,
+                    "task_recovery",
+                    "任务恢复",
+                    &final_exec,
+                    duration_ms,
+                );
             }
         }
 

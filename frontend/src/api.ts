@@ -177,3 +177,38 @@ export async function testNotification(id: string): Promise<{ delivered: boolean
     method: "POST",
   });
 }
+
+export async function login(username: string, password: string): Promise<{ token: string; expires_at: string }> {
+  return request<{ token: string; expires_at: string }>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export interface ApiTokenInfo {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+export async function listApiTokens(): Promise<ApiTokenInfo[]> {
+  return request<ApiTokenInfo[]>("/api/auth/tokens");
+}
+
+export async function createApiToken(name: string): Promise<{ id: string; name: string; token: string }> {
+  return request("/api/auth/tokens", { method: "POST", body: JSON.stringify({ name }) });
+}
+
+export async function revokeApiToken(id: string): Promise<void> {
+  await request(`/api/auth/tokens/${id}`, { method: "DELETE" });
+}
+
+export interface AuditEntry {
+  ts: string;
+  action: string;
+  summary: string;
+}
+
+export async function listAudit(limit = 100): Promise<AuditEntry[]> {
+  return request<AuditEntry[]>(`/api/audit?limit=${limit}`);
+}

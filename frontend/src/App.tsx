@@ -1,13 +1,14 @@
 import { BrowserRouter, Routes, Route, NavLink, useLocation } from "react-router-dom";
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Tasks = lazy(() => import("@/pages/Tasks"));
 const Executions = lazy(() => import("@/pages/Executions"));
-import { LayoutDashboard, ListTodo, ScrollText, Sun, Moon, RefreshCw, Languages } from "lucide-react";
+import { LayoutDashboard, ListTodo, ScrollText, Sun, Moon, RefreshCw, Languages, Settings } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import { t, toggleLang, useLang } from "@/lib/i18n";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthDialog } from "@/components/AuthDialog";
+import { SettingsDialog } from "@/components/SettingsDialog";
 import { SidebarProvider, Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -119,11 +120,13 @@ function SidebarNav() {
 
 function App() {
   const { theme, toggle } = useTheme();
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
     <TooltipProvider>
       <ToastContainer />
       <AuthDialog />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <BrowserRouter>
         <DocumentTitle />
         <SidebarProvider defaultOpen>
@@ -138,6 +141,9 @@ function App() {
                 <div className="flex-1" />
                 <Button size="icon-sm" variant="ghost" title="中文 / English" onClick={toggleLang}>
                   <Languages className="h-4 w-4" />
+                </Button>
+                <Button size="icon-sm" variant="ghost" title={t("Settings")} onClick={() => setSettingsOpen(true)}>
+                  <Settings className="h-4 w-4" />
                 </Button>
                 <Button size="icon-sm" variant="ghost" onClick={toggle}>
                   {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}

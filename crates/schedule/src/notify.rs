@@ -16,18 +16,23 @@ impl Notifier {
         Self { client }
     }
 
-    /// 按任务的通知配置推送;未配置(notify_type=none)时为 no-op。
-    pub fn send(
+    /// 显式指定渠道的推送(全局回落时渠道与任务字段无关)。
+    #[allow(clippy::too_many_arguments)]
+    pub fn send_channel(
         &self,
+        notify_type: &str,
+        notify_url: &str,
         task: &Task,
         event: &str,
         title: &str,
         exec: &TaskExecution,
         duration_ms: u64,
     ) {
-        if task.notify_type == "none" || task.notify_url.trim().is_empty() {
+        if notify_type == "none" || notify_url.trim().is_empty() {
             return;
         }
+        let notify_type = notify_type.to_string();
+        let notify_url = notify_url.to_string();
         let task = task.clone();
         let exec = exec.clone();
         let event = event.to_string();
@@ -35,7 +40,15 @@ impl Notifier {
         let this = self.clone();
         tokio::spawn(async move {
             if let Err(detail) = this
-                .send_sync(&task, &event, &title, &exec, duration_ms)
+                .send_sync_channel(
+                    &notify_type,
+                    &notify_url,
+                    &task,
+                    &event,
+                    &title,
+                    &exec,
+                    duration_ms,
+                )
                 .await
             {
                 tracing::warn!(event = %event, detail = %detail, "notification delivery failed");
@@ -44,15 +57,18 @@ impl Notifier {
     }
 
     /// 同步发送一条通知并返回投递结果(供"发送测试"等需要即时反馈的场景)。
-    pub async fn send_sync(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn send_sync_channel(
         &self,
+        notify_type: &str,
+        notify_url: &str,
         task: &Task,
         event: &str,
         title: &str,
         exec: &TaskExecution,
         duration_ms: u64,
     ) -> Result<(), String> {
-        if task.notify_type == "none" || task.notify_url.trim().is_empty() {
+        if notify_type == "none" || notify_url.trim().is_empty() {
             return Err("notifications not configured".into());
         }
 
@@ -65,8 +81,8 @@ impl Notifier {
             truncate(exec.output.as_deref().unwrap_or(""), 2000),
         );
 
-        let url = task.notify_url.clone();
-        let body = match task.notify_type.as_str() {
+        let url = notify_url.to_string();
+        let body = match notify_type {
             "feishu" => serde_json::json!({
                 "msg_type": "text",
                 "content": {"text": text},
