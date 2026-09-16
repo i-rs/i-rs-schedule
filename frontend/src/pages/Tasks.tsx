@@ -13,6 +13,7 @@ import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask,
 import { useRef } from "react";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
+import { TaskDetailDrawer } from "@/components/TaskDetailDrawer";
 import { timeUntil } from "@/lib/time";
 import { t as tr } from "@/lib/i18n";
 import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap, Loader2, Copy, Check, Bell, AlarmClock, Link2 } from "lucide-react";
@@ -70,6 +71,7 @@ export default function Tasks() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
+  const [detailTask, setDetailTask] = useState<Task | null>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -293,8 +295,9 @@ export default function Tasks() {
             return (
               <Card
                 key={t.id}
+                onClick={() => setDetailTask(t)}
                 style={{ animationDelay: `${Math.min(i, 12) * 40}ms` }}
-                className={`group/task stagger-item border-l-4 shadow-[var(--shadow-card)] transition-all duration-200 hover:shadow-[var(--shadow-card-hover)] ${t.enabled ? "border-l-primary" : "border-l-muted-foreground/40"}`}
+                className={`group/task stagger-item cursor-pointer border-l-4 shadow-[var(--shadow-card)] transition-all duration-200 hover:shadow-[var(--shadow-card-hover)] ${t.enabled ? "border-l-primary" : "border-l-muted-foreground/40"}`}
               >
                 <CardContent className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-4 gap-3">
                   <div className="space-y-1.5 flex-1 min-w-0">
@@ -335,7 +338,10 @@ export default function Tasks() {
                       </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 opacity-60 transition-opacity duration-200 group-hover/task:opacity-100">
+                  <div
+                    className="flex items-center gap-1 opacity-60 transition-opacity duration-200 group-hover/task:opacity-100"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     {t.enabled ? (
                       <Button size="icon-sm" variant="ghost" title="Disable" onClick={() => act(() => disableTask(t.id), "Task disabled")}>
                         <Square className="h-4 w-4" />
@@ -599,6 +605,8 @@ export default function Tasks() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <TaskDetailDrawer task={detailTask} onClose={() => setDetailTask(null)} />
 
       <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent className="sm:max-w-sm" showCloseButton={false}>

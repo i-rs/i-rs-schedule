@@ -146,3 +146,18 @@ export interface DailyStat {
 export async function dailyStats(): Promise<DailyStat[]> {
   return request<DailyStat[]>("/api/stats/daily");
 }
+
+export interface TaskStats {
+  total: number;
+  success: number;
+  failure: number;
+  avg_duration_ms: number | null;
+}
+
+export async function getTaskStats(id: string): Promise<TaskStats> {
+  return request<TaskStats>(`/api/tasks/${id}/stats`);
+}
+
+export async function listTaskExecutions(id: string, limit = 20): Promise<TaskExecution[]> {
+  return request<TaskExecution[]>(`/api/executions?task_id=${id}&limit=${limit}`);
+}

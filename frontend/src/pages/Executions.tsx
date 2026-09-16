@@ -11,6 +11,7 @@ import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
 import { t, tf, useLang } from "@/lib/i18n";
 import { timeAgo } from "@/lib/time";
+import { fmtDuration } from "@/lib/duration";
 import { RefreshCw, CheckCircle2, XCircle, Clock, PauseCircle, ChevronDown, ChevronUp, Inbox } from "lucide-react";
 
 const statusConfig: Record<string, { icon: typeof CheckCircle2; color: string; border: string }> = {
@@ -24,14 +25,6 @@ const statusConfig: Record<string, { icon: typeof CheckCircle2; color: string; b
 function fmtTime(iso: string) {
   const d = new Date(iso);
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-function fmtDuration(start: string, end: string | null) {
-  if (!end) return null;
-  const ms = new Date(end).getTime() - new Date(start).getTime();
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
 }
 
 function ExecutionCard({ e, task, onOpen }: { e: TaskExecution; task?: Task; onOpen?: () => void }) {
