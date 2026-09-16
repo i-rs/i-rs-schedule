@@ -532,17 +532,22 @@ pub fn build_router(
                     .daily_stats(cutoff)
                     .await
                     .map_err(|e| err_msg(500, format!("db error: {e}")))?;
-                let mut by_day: std::collections::HashMap<String, (i64, i64)> = rows
+                let mut by_day: std::collections::HashMap<String, (i64, i64, Option<f64>)> = rows
                     .into_iter()
-                    .map(|(day, success, failure)| (day, (success, failure)))
+                    .map(|(day, success, failure, avg)| (day, (success, failure, avg)))
                     .collect();
                 let days: Vec<serde_json::Value> = (0..14)
                     .map(|i| {
                         let d = (chrono::Utc::now() - chrono::Duration::days(13 - i))
                             .format("%Y-%m-%d")
                             .to_string();
-                        let (success, failure) = by_day.remove(&d).unwrap_or((0, 0));
-                        serde_json::json!({ "date": d, "success": success, "failure": failure })
+                        let (success, failure, avg) = by_day.remove(&d).unwrap_or((0, 0, None));
+                        serde_json::json!({
+                            "date": d,
+                            "success": success,
+                            "failure": failure,
+                            "avg_duration_ms": avg.map(|v| (v * 10.0).round() / 10.0),
+                        })
                     })
                     .collect();
                 ok(days)
