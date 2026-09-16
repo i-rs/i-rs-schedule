@@ -676,6 +676,24 @@ impl Db {
         .await
     }
 
+    /// 近 N 天每日执行统计:(day, success, failure),按日升序。缺失日由调用方补零。
+    pub async fn daily_stats(&self, cutoff_day: String) -> anyhow::Result<Vec<(String, i64, i64)>> {
+        let pool = self.pool.clone();
+        spawn_db(pool, move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT substr(started_at, 1, 10) AS day,
+                        SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN status = 'failure' THEN 1 ELSE 0 END)
+                 FROM task_executions WHERE started_at >= ?1 GROUP BY day ORDER BY day",
+            )?;
+            let rows = stmt.query_map(params![cutoff_day], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+        })
+        .await
+    }
+
     /// 删除早于 cutoff 的执行记录,返回删除行数。
     pub async fn purge_executions_older_than(&self, cutoff_iso: String) -> anyhow::Result<u64> {
         let pool = self.pool.clone();
