@@ -63,6 +63,7 @@ struct CreateTaskRequest {
     timezone: Option<String>,
     timeout_secs: Option<u64>,
     max_retries: Option<i64>,
+    trigger_task_id: Option<String>,
     notify_type: Option<String>,
     notify_url: Option<String>,
 }
@@ -74,6 +75,10 @@ struct ExecQuery {
 }
 
 fn build_task(body: CreateTaskRequest) -> Result<Task, String> {
+    build_task_with_hint(body, String::new())
+}
+
+fn build_task_with_hint(body: CreateTaskRequest, id_hint: String) -> Result<Task, String> {
     let task_type = match body.task_type.as_deref() {
         Some("shell") => TaskType::Shell {
             cmd: body.shell_cmd.unwrap_or_default(),
@@ -107,6 +112,10 @@ fn build_task(body: CreateTaskRequest) -> Result<Task, String> {
     if !(0..=10).contains(&max_retries) {
         return Err("max_retries must be between 0 and 10".into());
     }
+    let trigger_task_id = body.trigger_task_id.unwrap_or_default();
+    if !trigger_task_id.is_empty() && trigger_task_id == id_hint {
+        return Err("a task cannot trigger itself".into());
+    }
 
     let notify_type = body.notify_type.unwrap_or_else(|| "none".into());
     let notify_url = body.notify_url.unwrap_or_default();
@@ -131,6 +140,7 @@ fn build_task(body: CreateTaskRequest) -> Result<Task, String> {
     task.timezone = timezone;
     task.timeout_secs = timeout_secs;
     task.max_retries = max_retries;
+    task.trigger_task_id = trigger_task_id;
     Ok(task)
 }
 
@@ -157,6 +167,28 @@ impl Middleware for Auth {
     }
 }
 
+/// 校验触发链:目标存在且沿链不会回到 source(最多 20 步)。
+#[allow(clippy::result_large_err)]
+async fn check_trigger_chain(db: &Db, source_id: &str, target_id: &str) -> Result<(), Response> {
+    let mut current = target_id.to_string();
+    for _ in 0..20 {
+        if current == source_id {
+            return Err(err_msg(400, "circular trigger chain"));
+        }
+        match db.get_task(&current).await {
+            Ok(Some(t)) => {
+                if t.trigger_task_id.is_empty() {
+                    return Ok(());
+                }
+                current = t.trigger_task_id;
+            }
+            Ok(None) => return Err(err_msg(400, format!("trigger target {current} not found"))),
+            Err(e) => return Err(err_msg(500, format!("db error: {e}"))),
+        }
+    }
+    Err(err_msg(400, "trigger chain too long (max 20)"))
+}
+
 pub fn build_router(
     db: Db,
     cmd_tx: mpsc::UnboundedSender<ControlCmd>,
@@ -179,6 +211,9 @@ pub fn build_router(
                 .await
                 .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
             let task = build_task(body).map_err(|e| err_msg(400, e))?;
+            if !task.trigger_task_id.is_empty() {
+                check_trigger_chain(&db, &task.id, &task.trigger_task_id).await?;
+            }
             db.create_task(&task)
                 .await
                 .map_err(|e| err_msg(500, format!("db error: {e}")))?;
@@ -229,8 +264,11 @@ pub fn build_router(
                 .body()
                 .await
                 .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
-            let mut task = build_task(body).map_err(|e| err_msg(400, e))?;
-            task.id = id;
+            let mut task = build_task_with_hint(body, id.clone()).map_err(|e| err_msg(400, e))?;
+            task.id = id.clone();
+            if !task.trigger_task_id.is_empty() {
+                check_trigger_chain(&db, &id, &task.trigger_task_id).await?;
+            }
             task.updated_at = crate::db::now_iso();
             db.update_task(&task)
                 .await

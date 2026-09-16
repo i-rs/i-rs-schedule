@@ -2,6 +2,7 @@ use crate::db::{Task, TaskExecution};
 use std::time::Duration;
 
 /// 失败/恢复通知推送。fire-and-forget:发送失败仅记 warn,不影响执行主流程。
+#[derive(Clone)]
 pub struct Notifier {
     client: reqwest::Client,
 }

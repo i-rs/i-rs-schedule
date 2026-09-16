@@ -131,6 +131,7 @@ mod tests {
             timezone: timezone.into(),
             timeout_secs: 30,
             max_retries: 0,
+            trigger_task_id: String::new(),
             notify_type: "none".into(),
             notify_url: String::new(),
             created_at: crate::db::now_iso(),

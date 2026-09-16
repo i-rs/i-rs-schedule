@@ -8,6 +8,7 @@ pub struct ExecutionResult {
     pub http_status: Option<i64>,
 }
 
+#[derive(Clone)]
 pub struct Executor {
     client: reqwest::Client,
     notifier: Notifier,
@@ -48,6 +49,25 @@ impl Executor {
     /// create_execution 失败时返回一个内存构造的 `status="skipped"` 记录(不入库),
     /// 并打 warn 日志;execute 与 update_execution 的失败均告警但不影响返回。
     pub async fn execute_and_record(&self, db: &Db, task: &Task) -> TaskExecution {
+        self.execute_and_record_depth(db, task, 0).await
+    }
+
+    /// depth 用于链式触发的环防护(最大 10 层)。装箱返回以打破递归 future 的 Send 推导。
+    pub fn execute_and_record_depth<'a>(
+        &'a self,
+        db: &'a Db,
+        task: &'a Task,
+        depth: u32,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TaskExecution> + Send + 'a>> {
+        Box::pin(self.execute_and_record_depth_impl(db, task, depth))
+    }
+
+    async fn execute_and_record_depth_impl(
+        &self,
+        db: &Db,
+        task: &Task,
+        depth: u32,
+    ) -> TaskExecution {
         let mut attempt: i64 = 0;
         let (mut final_exec, mut duration_ms) = self.execute_attempt(db, task, attempt).await;
         // 失败且还有重试额度:指数退避后重试(30s 起步,封顶 8 分钟)。
@@ -77,6 +97,31 @@ impl Executor {
             {
                 self.notifier
                     .send(task, "task_recovery", "任务恢复", &final_exec, duration_ms);
+            }
+        }
+
+        // 依赖链:成功后触发下游任务(带深度防护)。
+        if final_exec.status == "success" && !task.trigger_task_id.is_empty() && depth < 10 {
+            if let Ok(Some(next)) = db.get_task(&task.trigger_task_id).await {
+                if next.enabled {
+                    tracing::info!(
+                        from = %task.id,
+                        to = %next.id,
+                        depth,
+                        "triggering downstream task"
+                    );
+                    let exec = self.clone();
+                    let next_db = db.clone();
+                    tokio::spawn(async move {
+                        let _ = exec
+                            .execute_and_record_depth(&next_db, &next, depth + 1)
+                            .await;
+                    });
+                } else {
+                    tracing::warn!(task_id = %task.trigger_task_id, "downstream task disabled; skipping trigger");
+                }
+            } else {
+                tracing::warn!(task_id = %task.trigger_task_id, "downstream task missing; skipping trigger");
             }
         }
 
