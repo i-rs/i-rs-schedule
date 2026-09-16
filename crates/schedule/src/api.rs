@@ -113,7 +113,8 @@ fn build_task_with_hint(body: CreateTaskRequest, id_hint: String) -> Result<Task
     if !(0..=10).contains(&max_retries) {
         return Err("max_retries must be between 0 and 10".into());
     }
-    let trigger_task_ids = body.trigger_task_ids.unwrap_or_default();
+    let mut trigger_task_ids = body.trigger_task_ids.unwrap_or_default();
+    trigger_task_ids.retain(|id| !id.trim().is_empty());
     if trigger_task_ids.contains(&id_hint) {
         return Err("a task cannot trigger itself".into());
     }
