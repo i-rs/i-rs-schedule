@@ -344,6 +344,7 @@ pub fn build_router(
     });
 
     let db_run = db.clone();
+    let executor_ntest = executor.clone();
     router.post("/api/tasks/:id/run", move |req: Request| {
         let db = db_run.clone();
         let exec = executor.clone();
@@ -445,6 +446,44 @@ pub fn build_router(
                     "failure": failure,
                     "avg_duration_ms": avg_ms.map(|v| (v * 10.0).round() / 10.0),
                 }))
+            }
+        });
+    }
+
+    // 通知测试:用真实渠道配置同步发送一条测试消息,返回投递结果。
+    {
+        let db_ntest = db.clone();
+        router.post("/api/tasks/:id/notify-test", move |req: Request| {
+            let db = db_ntest.clone();
+            let executor = executor_ntest.clone();
+            async move {
+                let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
+                let task = db
+                    .get_task(&id)
+                    .await
+                    .map_err(|e| err_msg(500, format!("db error: {e}")))?
+                    .ok_or_else(|| err_msg(404, "not found"))?;
+                if task.notify_type == "none" {
+                    return Err(err_msg(400, "notifications not configured for this task"));
+                }
+                let test_exec = crate::db::TaskExecution {
+                    id: "test".into(),
+                    task_id: task.id.clone(),
+                    attempt: 0,
+                    status: "test".into(),
+                    output: Some("This is a test notification from i-rs-schedule".into()),
+                    http_status: None,
+                    started_at: crate::db::now_iso(),
+                    finished_at: Some(crate::db::now_iso()),
+                };
+                match executor
+                    .notifier()
+                    .send_sync(&task, "test", "测试通知", &test_exec, 0)
+                    .await
+                {
+                    Ok(()) => ok(serde_json::json!({ "delivered": true, "detail": "notification delivered" })),
+                    Err(detail) => ok(serde_json::json!({ "delivered": false, "detail": detail })),
+                }
             }
         });
     }

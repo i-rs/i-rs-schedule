@@ -15,7 +15,7 @@ import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
 import { TaskDetailDrawer } from "@/components/TaskDetailDrawer";
 import { timeUntil, formatInTz } from "@/lib/time";
-import { cronPreview } from "@/api";
+import { cronPreview, testNotification } from "@/api";
 import { t as tr } from "@/lib/i18n";
 import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap, Loader2, Copy, Check, Bell, AlarmClock, Link2 } from "lucide-react";
 
@@ -76,6 +76,7 @@ export default function Tasks() {
   const importFileRef = useRef<HTMLInputElement>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [cronPreviewState, setCronPreviewState] = useState<{ times: string[] } | { error: string } | null>(null);
+  const [testingNotify, setTestingNotify] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -621,6 +622,30 @@ export default function Tasks() {
                   />
                 )}
               </div>
+              {editingId && form.notify_type !== "none" && (
+                <div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={testingNotify}
+                    onClick={async () => {
+                      if (!editingId) return;
+                      setTestingNotify(true);
+                      try {
+                        const r = await testNotification(editingId);
+                        if (r.delivered) toast.success(tr("Test notification delivered"));
+                        else toast.error(`${tr("Test failed")}: ${r.detail}`);
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : String(e));
+                      } finally {
+                        setTestingNotify(false);
+                      }
+                    }}
+                  >
+                    {testingNotify ? tr("Sending...") : tr("Send test notification")}
+                  </Button>
+                </div>
+              )}
               {form.notify_type !== "none" && (
                 <p className="text-xs text-muted-foreground">
                   任务失败时推送,失败后恢复会再推一条。

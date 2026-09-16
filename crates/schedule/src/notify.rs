@@ -28,6 +28,30 @@ impl Notifier {
         if task.notify_type == "none" || task.notify_url.trim().is_empty() {
             return;
         }
+        let task = task.clone();
+        let exec = exec.clone();
+        let event = event.to_string();
+        let title = title.to_string();
+        let this = self.clone();
+        tokio::spawn(async move {
+            if let Err(detail) = this.send_sync(&task, &event, &title, &exec, duration_ms).await {
+                tracing::warn!(event = %event, detail = %detail, "notification delivery failed");
+            }
+        });
+    }
+
+    /// 同步发送一条通知并返回投递结果(供"发送测试"等需要即时反馈的场景)。
+    pub async fn send_sync(
+        &self,
+        task: &Task,
+        event: &str,
+        title: &str,
+        exec: &TaskExecution,
+        duration_ms: u64,
+    ) -> Result<(), String> {
+        if task.notify_type == "none" || task.notify_url.trim().is_empty() {
+            return Err("notifications not configured".into());
+        }
 
         let text = format!(
             "[i-rs-schedule] {title}\n名称: {}\n任务ID: {}\n状态: {}\n耗时: {}ms\n输出: {}",
@@ -61,25 +85,11 @@ impl Notifier {
             }),
         };
 
-        let client = self.client.clone();
-        let event = event.to_string();
-        tokio::spawn(async move {
-            match client.post(&url).json(&body).send().await {
-                Ok(resp) if resp.status().is_success() => {
-                    tracing::info!(url = %url, event = %event, "notification sent");
-                }
-                Ok(resp) => {
-                    tracing::warn!(
-                        url = %url,
-                        status = %resp.status(),
-                        "notification endpoint returned error"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(url = %url, error = %e, "failed to send notification");
-                }
-            }
-        });
+        match self.client.post(&url).json(&body).send().await {
+            Ok(resp) if resp.status().is_success() => Ok(()),
+            Ok(resp) => Err(format!("endpoint returned {}", resp.status())),
+            Err(e) => Err(e.to_string()),
+        }
     }
 }
 
