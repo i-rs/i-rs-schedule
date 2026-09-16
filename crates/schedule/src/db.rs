@@ -703,18 +703,28 @@ impl Db {
         .await
     }
 
-    /// 近 N 天每日执行统计:(day, success, failure),按日升序。缺失日由调用方补零。
-    pub async fn daily_stats(&self, cutoff_day: String) -> anyhow::Result<Vec<(String, i64, i64)>> {
+    /// 近 N 天每日执行统计:(day, success, failure, 平均耗时ms),按日升序。缺失日由调用方补零。
+    pub async fn daily_stats(
+        &self,
+        cutoff_day: String,
+    ) -> anyhow::Result<Vec<(String, i64, i64, Option<f64>)>> {
         let pool = self.pool.clone();
         spawn_db(pool, move |conn| {
             let mut stmt = conn.prepare(
                 "SELECT substr(started_at, 1, 10) AS day,
                         SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END),
-                        SUM(CASE WHEN status = 'failure' THEN 1 ELSE 0 END)
+                        SUM(CASE WHEN status = 'failure' THEN 1 ELSE 0 END),
+                        AVG(CASE WHEN finished_at IS NOT NULL
+                                 THEN (julianday(finished_at) - julianday(started_at)) * 86400000 END)
                  FROM task_executions WHERE started_at >= ?1 GROUP BY day ORDER BY day",
             )?;
             let rows = stmt.query_map(params![cutoff_day], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, Option<f64>>(3)?,
+                ))
             })?;
             rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
         })

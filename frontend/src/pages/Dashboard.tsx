@@ -7,7 +7,7 @@ import { useApi } from "@/hooks/useApi";
 import { timeAgo, fullTime } from "@/lib/time";
 import { t, useLang } from "@/lib/i18n";
 import { ListTodo, Play, CheckCircle2, AlertCircle } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, XAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Line, XAxis, YAxis } from "recharts";
 import {
   ChartContainer,
   ChartTooltip,
@@ -56,6 +56,7 @@ export default function Dashboard() {
   const dailyChartConfig = {
     success: { label: t("Success"), color: "var(--chart-2)" },
     failure: { label: t("Failed"), color: "var(--chart-3)" },
+    duration: { label: t("Avg duration"), color: "var(--chart-1)" },
   } satisfies ChartConfig;
   void lang;
 
@@ -114,9 +115,20 @@ export default function Dashboard() {
                 minTickGap={16}
                 tickFormatter={(v: string) => v.slice(5)}
               />
+              <YAxis yAxisId="counts" hide />
+              <YAxis yAxisId="ms" orientation="right" hide />
               <ChartTooltip content={<ChartTooltipContent />} />
               <Bar dataKey="success" stackId="a" fill="var(--color-success)" radius={[2, 2, 0, 0]} />
               <Bar dataKey="failure" stackId="a" fill="var(--color-failure)" radius={[2, 2, 0, 0]} />
+              <Line
+                yAxisId="ms"
+                type="monotone"
+                dataKey="avg_duration_ms"
+                stroke="var(--color-duration)"
+                strokeWidth={2}
+                dot={false}
+                connectNulls
+              />
             </BarChart>
           </ChartContainer>
           {daily.every((d) => d.success + d.failure === 0) && (

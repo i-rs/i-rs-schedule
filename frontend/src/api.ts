@@ -141,6 +141,7 @@ export interface DailyStat {
   date: string;
   success: number;
   failure: number;
+  avg_duration_ms: number | null;
 }
 
 export async function dailyStats(): Promise<DailyStat[]> {
