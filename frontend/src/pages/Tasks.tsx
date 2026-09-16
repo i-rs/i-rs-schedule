@@ -197,6 +197,27 @@ export default function Tasks() {
     }
   };
 
+  const cloneTask = (source: Task) => {
+    const src = source;
+    const payload = {
+      name: `${src.name} (copy)`,
+      task_type: src.task_type.type,
+      schedule_type: src.schedule.type,
+      ...(src.schedule.type === "cron"
+        ? { cron_expr: src.schedule.expr }
+        : { delay_secs: src.schedule.delay_secs }),
+      ...(src.task_type.type === "http"
+        ? { http_method: src.task_type.method, http_url: src.task_type.url, http_body: src.task_type.body ?? undefined }
+        : { shell_cmd: src.task_type.cmd }),
+      timezone: src.timezone,
+      timeout_secs: src.timeout_secs,
+      max_retries: src.max_retries,
+      notify_type: src.notify_type,
+      ...(src.notify_type !== "none" ? { notify_url: src.notify_url } : {}),
+    };
+    act(() => createTask(payload), "Task cloned");
+  };
+
   // Run 是同步请求(等待执行完成),需要按任务粒度的 loading 反馈。
   const runTaskNow = async (id: string) => {
     setRunningId(id);
@@ -386,6 +407,9 @@ export default function Tasks() {
                     </Button>
                     <Button size="icon-sm" variant="ghost" title={tr("Edit")} onClick={() => openEdit(t)}>
                       <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button size="icon-sm" variant="ghost" title={tr("Clone")} onClick={() => cloneTask(t)}>
+                      <Copy className="h-4 w-4" />
                     </Button>
                     <Button
                       size="icon-sm"

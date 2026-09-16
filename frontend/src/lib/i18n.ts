@@ -58,6 +58,7 @@ const zh: Record<string, string> = {
   Enable: "启用",
   Disable: "禁用",
   Edit: "编辑",
+  Clone: "克隆",
   Copy: "复制",
   Delete: "删除",
   "Delete Task": "删除任务",
