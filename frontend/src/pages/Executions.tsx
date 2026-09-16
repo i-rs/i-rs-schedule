@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { listExecutions, listTasks, type TaskExecution, type Task } from "@/api";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
+import { t, tf, useLang } from "@/lib/i18n";
 import { timeAgo } from "@/lib/time";
 import { RefreshCw, CheckCircle2, XCircle, Clock, PauseCircle, ChevronDown, ChevronUp, Inbox } from "lucide-react";
 
@@ -52,9 +53,14 @@ function ExecutionCard({ e, task, onOpen }: { e: TaskExecution; task?: Task; onO
                 <Icon className="h-3.5 w-3.5" />
               </span>
               <Badge variant={e.status === "success" ? "default" : e.status === "running" ? "outline" : "destructive"}>
-                {e.status}
+                {t(e.status)}
               </Badge>
               {task && <span className="text-sm font-medium truncate">{task.name}</span>}
+              {e.attempt > 0 && (
+                <span className="text-xs text-amber-500 tabular-nums">
+                  {tf("attempt {n}", { n: e.attempt + 1 })}
+                </span>
+              )}
               {e.http_status && (
                 <span className="text-xs text-muted-foreground tabular-nums">HTTP {e.http_status}</span>
               )}
@@ -70,7 +76,7 @@ function ExecutionCard({ e, task, onOpen }: { e: TaskExecution; task?: Task; onO
                   className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
                 >
                   {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                  {expanded ? "Hide" : "Show"} output
+                  {expanded ? t("Hide output") : t("Show output")}
                 </button>
                 {expanded && (
                   <pre className="mt-2 rounded-md border border-border/50 bg-muted/50 p-3 text-xs text-muted-foreground font-mono max-h-48 overflow-auto">
@@ -92,6 +98,8 @@ function ExecutionCard({ e, task, onOpen }: { e: TaskExecution; task?: Task; onO
 }
 
 export default function Executions() {
+  const lang = useLang();
+  void lang;
   const [filterTaskId, setFilterTaskId] = useState("all");
   const [limit, setLimit] = useState(20);
   const [statusFilter, setStatusFilter] = useState("all");
@@ -107,7 +115,7 @@ export default function Executions() {
   );
 
   useEffect(() => {
-    if (error) toast.error(`Failed to load executions: ${error.message}`);
+    if (error) toast.error(`${t("Failed to load executions: ")}${error.message}`);
   }, [error]);
 
   const [execs, tasks] = data ?? [[], []];
@@ -119,14 +127,14 @@ export default function Executions() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Execution Logs</h1>
+        <h1 className="text-3xl font-bold tracking-tight">{t("Execution Logs")}</h1>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <Tabs value={statusFilter} onValueChange={setStatusFilter}>
             <TabsList>
-              <TabsTrigger value="all">All</TabsTrigger>
-              <TabsTrigger value="success">Success</TabsTrigger>
-              <TabsTrigger value="failure">Failure</TabsTrigger>
-              <TabsTrigger value="running">Running</TabsTrigger>
+              <TabsTrigger value="all">{t("All")}</TabsTrigger>
+              <TabsTrigger value="success">{t("Success")}</TabsTrigger>
+              <TabsTrigger value="failure">{t("Failure")}</TabsTrigger>
+              <TabsTrigger value="running">{t("Running")}</TabsTrigger>
             </TabsList>
           </Tabs>
           <div className="flex gap-2">
@@ -135,7 +143,7 @@ export default function Executions() {
               <SelectValue placeholder="All Tasks" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Tasks</SelectItem>
+              <SelectItem value="all">{t("All Tasks")}</SelectItem>
               {tasks.map((t) => (
                 <SelectItem key={t.id} value={t.id}>
                   {t.name}
@@ -175,8 +183,8 @@ export default function Executions() {
           <span className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 mb-4">
             <Inbox className="h-7 w-7 text-primary/60" />
           </span>
-          <p className="text-sm font-medium">No execution logs yet</p>
-          <p className="text-xs mt-1 text-muted-foreground/70">Tasks will appear here once they start running.</p>
+          <p className="text-sm font-medium">{t("No execution logs yet")}</p>
+          <p className="text-xs mt-1 text-muted-foreground/70">{t("Tasks will appear here once they start running.")}</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -191,7 +199,7 @@ export default function Executions() {
           {!atEnd && (
             <div className="flex justify-center pt-2">
               <Button variant="outline" size="sm" onClick={() => setLimit((l) => l + 20)} disabled={loading}>
-                <ChevronDown className="h-4 w-4" /> Load More
+                <ChevronDown className="h-4 w-4" /> {t("Load More")}
               </Button>
             </div>
           )}
@@ -203,35 +211,35 @@ export default function Executions() {
           {detailExec && (
             <>
               <DialogHeader>
-                <DialogTitle>Execution Details</DialogTitle>
+            <DialogTitle>{t("Execution Details")}</DialogTitle>
                 <DialogDescription>
                   {tasks.find((t) => t.id === detailExec.task_id)?.name ?? detailExec.task_id.slice(0, 8)}
                 </DialogDescription>
               </DialogHeader>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                 <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">Status</p>
+                  <p className="text-xs text-muted-foreground">{t("Status")}</p>
                   <Badge variant={detailExec.status === "success" ? "default" : detailExec.status === "running" ? "outline" : "destructive"}>
-                    {detailExec.status}
+                    {t(detailExec.status)}
                   </Badge>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">HTTP Status</p>
+                  <p className="text-xs text-muted-foreground">{t("HTTP Status")}</p>
                   <p className="tabular-nums">{detailExec.http_status ?? "—"}</p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">Started</p>
+                  <p className="text-xs text-muted-foreground">{t("Started")}</p>
                   <p className="text-xs tabular-nums">{fmtTime(detailExec.started_at)}</p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">Duration</p>
+                  <p className="text-xs text-muted-foreground">{t("Duration")}</p>
                   <p className="tabular-nums">{fmtDuration(detailExec.started_at, detailExec.finished_at) ?? "—"}</p>
                 </div>
               </div>
               <div className="space-y-1.5">
-                <p className="text-xs text-muted-foreground">Output</p>
+                <p className="text-xs text-muted-foreground">{t("Output")}</p>
                 <pre className="rounded-md border border-border/50 bg-muted/50 p-3 text-xs text-muted-foreground font-mono max-h-[50vh] overflow-auto whitespace-pre-wrap">
-                  {detailExec.output ?? "(no output)"}
+                  {detailExec.output ?? t("(no output)")}
                 </pre>
               </div>
             </>

@@ -4,9 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getToken, setToken } from "@/api";
+import { t, useLang } from "@/lib/i18n";
 
 /** 服务端启用 SCHEDULE_TOKEN 后,任意请求 401 会触发本对话框收集 token。 */
 export function AuthDialog() {
+  const lang = useLang();
+  void lang;
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
 
@@ -29,10 +32,10 @@ export function AuthDialog() {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="sm:max-w-sm" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>Authentication required</DialogTitle>
+          <DialogTitle>{t("Authentication required")}</DialogTitle>
           <DialogDescription>
-            This server requires an API token. Paste your token to continue.
-          </DialogDescription>
+              {t("This server requires an API token. Paste your token to continue.")}
+            </DialogDescription>
         </DialogHeader>
         <div className="space-y-1.5">
           <Label htmlFor="auth-token">API Token</Label>
@@ -47,7 +50,7 @@ export function AuthDialog() {
           />
         </div>
         <DialogFooter>
-          <Button onClick={save} disabled={!value.trim()}>Save</Button>
+          <Button onClick={save} disabled={!value.trim()}>{t("Save")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

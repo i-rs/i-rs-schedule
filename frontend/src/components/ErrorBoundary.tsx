@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from "react";
 import { AlertTriangle, RotateCw } from "lucide-react";
+import { t } from "@/lib/i18n";
 
 interface Props {
   children: ReactNode;
@@ -29,7 +30,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <AlertTriangle className="h-6 w-6 text-destructive" />
           </span>
           <div className="text-center">
-            <p className="text-sm font-medium text-foreground">Something went wrong</p>
+            <p className="text-sm font-medium text-foreground">{t("Something went wrong")}</p>
             <p className="text-xs mt-1 max-w-sm break-all text-muted-foreground/70">
               {this.state.error.message}
             </p>
@@ -38,7 +39,7 @@ export class ErrorBoundary extends Component<Props, State> {
             onClick={() => this.setState({ error: null })}
             className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors hover:bg-muted cursor-pointer"
           >
-            <RotateCw className="h-3.5 w-3.5" /> Try again
+            <RotateCw className="h-3.5 w-3.5" /> {t("Try again")}
           </button>
         </div>
       );

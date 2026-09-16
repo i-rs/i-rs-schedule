@@ -14,6 +14,7 @@ import { useRef } from "react";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
 import { timeUntil } from "@/lib/time";
+import { t as tr } from "@/lib/i18n";
 import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap, Loader2, Copy, Check, Bell, AlarmClock, Link2 } from "lucide-react";
 
 interface TaskForm {
@@ -74,24 +75,24 @@ export default function Tasks() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (error) toast.error(`Failed to load tasks: ${error.message}`);
+    if (error) toast.error(`${tr("Failed to load tasks: ")}${error.message}`);
   }, [error]);
 
   const handleSubmit = async () => {
     if (!form.name.trim()) {
-      toast.error("Name is required");
+      toast.error(tr("Name is required"));
       return;
     }
     if (form.schedule_type === "cron" && !form.cron_expr.trim()) {
-      toast.error("Cron expression is required");
+      toast.error(tr("Cron expression is required"));
       return;
     }
     if (form.task_type === "http" && !form.http_url.trim()) {
-      toast.error("URL is required for HTTP tasks");
+      toast.error(tr("URL is required for HTTP tasks"));
       return;
     }
     if (form.task_type === "http" && !/^https?:\/\//.test(form.http_url.trim())) {
-      toast.error("URL must start with http:// or https://");
+      toast.error(tr("URL must start with http:// or https://"));
       return;
     }
 
@@ -115,10 +116,10 @@ export default function Tasks() {
     try {
       if (editingId) {
         await updateTask(editingId, payload);
-        toast.success("Task updated");
+        toast.success(tr("Task updated"));
       } else {
         await createTask(payload);
-        toast.success("Task created");
+        toast.success(tr("Task created"));
       }
       setShowDialog(false);
       setForm(emptyForm);
@@ -163,7 +164,7 @@ export default function Tasks() {
   const act = async (fn: () => Promise<unknown>, successMsg?: string) => {
     try {
       await fn();
-      if (successMsg) toast.success(successMsg);
+      if (successMsg) toast.success(tr(successMsg));
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -175,7 +176,7 @@ export default function Tasks() {
     setRunningId(id);
     try {
       await runTask(id);
-      toast.success("Task triggered");
+      toast.success(tr("Task triggered"));
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -191,14 +192,14 @@ export default function Tasks() {
       setCopiedId(t.id);
       setTimeout(() => setCopiedId((cur) => (cur === t.id ? null : cur)), 1500);
     } catch {
-      toast.error("Failed to copy");
+      toast.error(tr("Failed to copy"));
     }
   };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Tasks</h1>
+        <h1 className="text-3xl font-bold tracking-tight">{tr("Tasks")}</h1>
         <div className="flex gap-2">
           <input
             ref={importFileRef}
@@ -246,7 +247,7 @@ export default function Tasks() {
             <RefreshCw className="h-4 w-4" />
           </Button>
           <Button size="sm" onClick={openCreate}>
-            <Plus className="h-4 w-4" /> New Task
+            <Plus className="h-4 w-4" /> {tr("New Task")}
           </Button>
         </div>
       </div>
@@ -278,10 +279,10 @@ export default function Tasks() {
           <span className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 mb-4">
             <Inbox className="h-7 w-7 text-primary/60" />
           </span>
-          <p className="text-sm font-medium">No tasks yet</p>
-          <p className="text-xs mt-1 text-muted-foreground/70">Create one to start scheduling.</p>
+          <p className="text-sm font-medium">{tr("No tasks yet")}</p>
+          <p className="text-xs mt-1 text-muted-foreground/70">{tr("Create one to start scheduling.")}</p>
           <Button size="sm" onClick={openCreate} className="mt-4">
-            <Plus className="h-4 w-4" /> Create Task
+            <Plus className="h-4 w-4" /> {tr("Create Task")}
           </Button>
         </div>
       ) : (
@@ -303,7 +304,7 @@ export default function Tasks() {
                       </span>
                       <span className="font-medium text-[15px]">{t.name}</span>
                       <Badge variant={t.enabled ? "default" : "secondary"} className="text-[10px]">
-                        {t.enabled ? "Enabled" : "Disabled"}
+                        {t.enabled ? tr("Enabled") : tr("Disabled")}
                       </Badge>
                       <Badge variant="outline" className="text-[10px]">{t.task_type.type.toUpperCase()}</Badge>
                       <Badge variant="outline" className="text-[10px]">
@@ -326,7 +327,7 @@ export default function Tasks() {
                     <div className="flex items-center gap-1.5 min-w-0">
                       <p className="text-xs text-muted-foreground truncate font-mono">{url}</p>
                       <button
-                        title="Copy"
+                        title={tr("Copy")}
                         onClick={() => copyUrl(t)}
                         className="shrink-0 text-muted-foreground/50 hover:text-foreground transition-all cursor-pointer"
                       >
@@ -347,19 +348,19 @@ export default function Tasks() {
                     <Button
                       size="icon-sm"
                       variant="ghost"
-                      title={runningId === t.id ? "Running..." : "Run Now"}
+                      title={runningId === t.id ? tr("Running...") : tr("Run Now")}
                       disabled={runningId === t.id}
                       onClick={() => runTaskNow(t.id)}
                     >
                       {runningId === t.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
                     </Button>
-                    <Button size="icon-sm" variant="ghost" title="Edit" onClick={() => openEdit(t)}>
+                    <Button size="icon-sm" variant="ghost" title={tr("Edit")} onClick={() => openEdit(t)}>
                       <Pencil className="h-4 w-4" />
                     </Button>
                     <Button
                       size="icon-sm"
                       variant="ghost"
-                      title="Delete"
+                      title={tr("Delete")}
                       onClick={() => setDeleteTarget(t)}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
@@ -375,17 +376,17 @@ export default function Tasks() {
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>{editingId ? "Edit Task" : "Create Task"}</DialogTitle>
+            <DialogTitle>{editingId ? tr("Edit Task") : tr("Create Task")}</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <Label>Name</Label>
+              <Label>{tr("Name")}</Label>
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="My Task" />
             </div>
 
             <div className="space-y-1.5">
-              <Label>Type</Label>
+              <Label>{tr("Type")}</Label>
               <Tabs value={form.task_type} onValueChange={(v) => setForm({ ...form, task_type: v as "http" | "shell" })}>
                 <TabsList>
                   <TabsTrigger value="http">HTTP</TabsTrigger>
@@ -395,7 +396,7 @@ export default function Tasks() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Schedule</Label>
+              <Label>{tr("Schedule")}</Label>
               <div className="flex gap-3">
                 <Select value={form.schedule_type} onValueChange={(v) => setForm({ ...form, schedule_type: v as "cron" | "once" })}>
                   <SelectTrigger className="w-40">
@@ -403,7 +404,7 @@ export default function Tasks() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="cron">Cron</SelectItem>
-                    <SelectItem value="once">Once (delay)</SelectItem>
+                    <SelectItem value="once">{tr("Once (delay)")}</SelectItem>
                   </SelectContent>
                 </Select>
                 {form.schedule_type === "cron" ? (
@@ -427,7 +428,7 @@ export default function Tasks() {
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="flex items-center gap-1.5">
-                        <Label className="text-xs text-muted-foreground">Timeout (s)</Label>
+                        <Label className="text-xs text-muted-foreground">{tr("Timeout (s)")}</Label>
                         <Input
                           type="number"
                           value={form.timeout_secs}
@@ -436,7 +437,7 @@ export default function Tasks() {
                         />
                       </div>
                       <div className="flex items-center gap-1.5">
-                        <Label className="text-xs text-muted-foreground">Retries</Label>
+                        <Label className="text-xs text-muted-foreground">{tr("Retries")}</Label>
                         <Input
                           type="number"
                           value={form.max_retries}
@@ -446,7 +447,7 @@ export default function Tasks() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <Label className="text-xs text-muted-foreground">Timezone</Label>
+                      <Label className="text-xs text-muted-foreground">{tr("Timezone")}</Label>
                       <Select value={form.timezone} onValueChange={(v) => setForm({ ...form, timezone: v || "UTC" })}>
                         <SelectTrigger className="w-44 h-7 text-xs">
                           <SelectValue />
@@ -500,7 +501,7 @@ export default function Tasks() {
               <>
                 <div className="flex gap-3">
                   <div className="w-24 space-y-1.5">
-                    <Label>Method</Label>
+                    <Label>{tr("Method")}</Label>
                     <Select value={form.http_method} onValueChange={(v) => setForm({ ...form, http_method: v || "GET" })}>
                       <SelectTrigger>
                         <SelectValue />
@@ -514,12 +515,12 @@ export default function Tasks() {
                     </Select>
                   </div>
                   <div className="flex-1 space-y-1.5">
-                    <Label>URL</Label>
+                    <Label>{tr("URL")}</Label>
                     <Input value={form.http_url} onChange={(e) => setForm({ ...form, http_url: e.target.value })} placeholder="https://example.com/api" />
                   </div>
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Body (optional)</Label>
+                  <Label>{tr("Body (optional)")}</Label>
                   <Textarea
                     value={form.http_body}
                     onChange={(e) => setForm({ ...form, http_body: e.target.value })}
@@ -530,7 +531,7 @@ export default function Tasks() {
               </>
             ) : (
               <div className="space-y-1.5">
-                <Label>Command</Label>
+                <Label>{tr("Command")}</Label>
                 <Textarea
                   value={form.shell_cmd}
                   onChange={(e) => setForm({ ...form, shell_cmd: e.target.value })}
@@ -542,32 +543,32 @@ export default function Tasks() {
             )}
 
             <div className="space-y-1.5">
-              <Label>On Success</Label>
+              <Label>{tr("On Success")}</Label>
               <Select value={form.trigger_task_id || "none"} onValueChange={(v) => setForm({ ...form, trigger_task_id: v && v !== "none" ? v : "" })}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
+                  <SelectItem value="none">{tr("None")}</SelectItem>
                   {tasks.filter((t) => t.id !== editingId).map((t) => (
                     <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                When this task succeeds, run the selected task automatically.
+                {tr("When this task succeeds, run the selected task automatically.")}
               </p>
             </div>
 
             <div className="space-y-1.5">
-              <Label>Notification</Label>
+              <Label>{tr("Notification")}</Label>
               <div className="flex gap-3">
                 <Select value={form.notify_type} onValueChange={(v) => setForm({ ...form, notify_type: v as TaskForm["notify_type"] })}>
                   <SelectTrigger className="w-32">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
+                    <SelectItem value="none">{tr("None")}</SelectItem>
                     <SelectItem value="webhook">Webhook</SelectItem>
                     <SelectItem value="feishu">飞书</SelectItem>
                     <SelectItem value="dingtalk">钉钉</SelectItem>
@@ -591,9 +592,9 @@ export default function Tasks() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDialog(false)} disabled={submitting}>Cancel</Button>
+            <Button variant="outline" onClick={() => setShowDialog(false)} disabled={submitting}>{tr("Cancel")}</Button>
             <Button onClick={handleSubmit} disabled={!form.name || submitting}>
-              {submitting ? "Saving..." : editingId ? "Update" : "Create"}
+              {submitting ? tr("Saving...") : editingId ? tr("Update") : tr("Create")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -602,14 +603,14 @@ export default function Tasks() {
       <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent className="sm:max-w-sm" showCloseButton={false}>
           <DialogHeader>
-            <DialogTitle>Delete Task</DialogTitle>
+            <DialogTitle>{tr("Delete Task")}</DialogTitle>
             <DialogDescription>
               Delete <span className="font-medium text-foreground">{deleteTarget?.name}</span>? Its
               execution history will be removed as well. This cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>{tr("Cancel")}</Button>
             <Button
               variant="destructive"
               onClick={() => {
@@ -619,7 +620,7 @@ export default function Tasks() {
                 setDeleteTarget(null);
               }}
             >
-              Delete
+              {tr("Delete")}
             </Button>
           </DialogFooter>
         </DialogContent>

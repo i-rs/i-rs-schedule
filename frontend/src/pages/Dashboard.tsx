@@ -5,6 +5,7 @@ import { listTasks, listExecutions, dailyStats, type Task, type TaskExecution, t
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
 import { timeAgo, fullTime } from "@/lib/time";
+import { t, useLang } from "@/lib/i18n";
 import { ListTodo, Play, CheckCircle2, AlertCircle } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, XAxis } from "recharts";
 import {
@@ -30,6 +31,9 @@ export default function Dashboard() {
     if (error) toast.error(`Failed to load dashboard: ${error.message}`);
   }, [error]);
 
+  const lang = useLang();
+  void lang;
+
   const [tasks, execs, daily] = data ?? [[], [], []];
   const enabled = tasks.filter((t) => t.enabled).length;
   const recent = execs.slice(0, 10);
@@ -37,8 +41,8 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
-        <h1 className="text-2xl font-bold">Dashboard</h1>
+      <div className="space-y-8">
+        <h1 className="text-3xl font-bold tracking-tight">{t("Dashboard")}</h1>
       <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
           {[...Array(4)].map((_, i) => (
             <Skeleton key={i} className="h-24" />
@@ -50,9 +54,10 @@ export default function Dashboard() {
   }
 
   const dailyChartConfig = {
-    success: { label: "Success", color: "var(--chart-2)" },
-    failure: { label: "Failed", color: "var(--chart-3)" },
+    success: { label: t("Success"), color: "var(--chart-2)" },
+    failure: { label: t("Failed"), color: "var(--chart-3)" },
   } satisfies ChartConfig;
+  void lang;
 
   const stats = [
     { label: "Total Tasks", value: tasks.length, icon: ListTodo, color: "text-primary", glow: "bg-primary/10", bar: "bg-primary" },
@@ -63,7 +68,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+      <h1 className="text-3xl font-bold tracking-tight">{t("Dashboard")}</h1>
 
       <div className="grid gap-4 md:grid-cols-4">
         {stats.map((s, i) => {
@@ -77,7 +82,7 @@ export default function Dashboard() {
               {/* 顶部状态色细线 */}
               <span className={`absolute inset-x-0 top-0 h-0.5 ${s.bar}`} />
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">{s.label}</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">{t(s.label)}</CardTitle>
                 <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${s.glow}`}>
                   <Icon className={`h-4 w-4 ${s.color}`} />
                 </span>
@@ -92,7 +97,7 @@ export default function Dashboard() {
 
       <Card className="shadow-[var(--shadow-card)]">
         <CardHeader>
-          <CardTitle>Executions — last 14 days</CardTitle>
+          <CardTitle>{t("Executions — last 14 days")}</CardTitle>
         </CardHeader>
         <CardContent>
           <ChartContainer
@@ -115,18 +120,18 @@ export default function Dashboard() {
             </BarChart>
           </ChartContainer>
           {daily.every((d) => d.success + d.failure === 0) && (
-            <p className="text-xs text-muted-foreground mt-2">No executions in the last 14 days.</p>
+            <p className="text-xs text-muted-foreground mt-2">{t("No executions in the last 14 days.")}</p>
           )}
         </CardContent>
       </Card>
 
       <Card className="shadow-[var(--shadow-card)]">
         <CardHeader>
-          <CardTitle>Recent Executions</CardTitle>
+          <CardTitle>{t("Recent Executions")}</CardTitle>
         </CardHeader>
         <CardContent>
           {recent.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No executions yet.</p>
+            <p className="text-sm text-muted-foreground">{t("No executions yet.")}</p>
           ) : (
             <div className="-mx-2">
               {recent.map((e) => {

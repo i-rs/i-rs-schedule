@@ -3,8 +3,9 @@ import { lazy, Suspense, useEffect } from "react";
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Tasks = lazy(() => import("@/pages/Tasks"));
 const Executions = lazy(() => import("@/pages/Executions"));
-import { LayoutDashboard, ListTodo, ScrollText, Sun, Moon, RefreshCw } from "lucide-react";
+import { LayoutDashboard, ListTodo, ScrollText, Sun, Moon, RefreshCw, Languages } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
+import { t, toggleLang, useLang } from "@/lib/i18n";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthDialog } from "@/components/AuthDialog";
 import { SidebarProvider, Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
@@ -28,9 +29,11 @@ const pageTitles: Record<string, string> = {
 /** 按路由更新浏览器标签页标题。 */
 function DocumentTitle() {
   const { pathname } = useLocation();
+  const lang = useLang();
   useEffect(() => {
-    document.title = `${pageTitles[pathname] ?? "i-rs-schedule"} · i-rs-schedule`;
-  }, [pathname]);
+    const name = pageTitles[pathname];
+    document.title = `${name ? t(name) : "i-rs-schedule"} · i-rs-schedule`;
+  }, [pathname, lang]);
   return null;
 }
 
@@ -38,8 +41,13 @@ function DocumentTitle() {
 function HeaderPageName() {
   const { pathname } = useLocation();
   const name = pageTitles[pathname];
+  const lang = useLang();
   if (!name) return null;
-  return <span className="text-sm text-muted-foreground">{name}</span>;
+  return (
+    <span className="text-sm text-muted-foreground" key={lang}>
+      {t(name)}
+    </span>
+  );
 }
 
 function SidebarNav() {
@@ -84,7 +92,7 @@ function SidebarNav() {
                       }
                     >
                       <Icon />
-                      {!collapsed && <span className="truncate">{label}</span>}
+                      {!collapsed && <span className="truncate">{t(label)}</span>}
                     </NavLink>
                   );
 
@@ -128,6 +136,9 @@ function App() {
                 <span className="hidden sm:inline"><HeaderPageName /></span>
                 <span className="font-bold text-lg tracking-tight md:hidden">i-rs-schedule</span>
                 <div className="flex-1" />
+                <Button size="icon-sm" variant="ghost" title="中文 / English" onClick={toggleLang}>
+                  <Languages className="h-4 w-4" />
+                </Button>
                 <Button size="icon-sm" variant="ghost" onClick={toggle}>
                   {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
                 </Button>
