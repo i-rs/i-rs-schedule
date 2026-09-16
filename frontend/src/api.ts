@@ -136,3 +136,13 @@ export async function importTasks(payload: { version: string; tasks: Task[] }): 
     body: JSON.stringify(payload),
   });
 }
+
+export interface DailyStat {
+  date: string;
+  success: number;
+  failure: number;
+}
+
+export async function dailyStats(): Promise<DailyStat[]> {
+  return request<DailyStat[]>("/api/stats/daily");
+}

@@ -428,6 +428,37 @@ pub fn build_router(
         });
     }
 
+    // 近 14 天每日执行统计(success/failure),供 Dashboard 图表。
+    {
+        let db_daily = db.clone();
+        router.get("/api/stats/daily", move |_req: Request| {
+            let db = db_daily.clone();
+            async move {
+                let cutoff = (chrono::Utc::now() - chrono::Duration::days(13))
+                    .format("%Y-%m-%d")
+                    .to_string();
+                let rows = db
+                    .daily_stats(cutoff)
+                    .await
+                    .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                let mut by_day: std::collections::HashMap<String, (i64, i64)> = rows
+                    .into_iter()
+                    .map(|(day, success, failure)| (day, (success, failure)))
+                    .collect();
+                let days: Vec<serde_json::Value> = (0..14)
+                    .map(|i| {
+                        let d = (chrono::Utc::now() - chrono::Duration::days(13 - i))
+                            .format("%Y-%m-%d")
+                            .to_string();
+                        let (success, failure) = by_day.remove(&d).unwrap_or((0, 0));
+                        serde_json::json!({ "date": d, "success": success, "failure": failure })
+                    })
+                    .collect();
+                ok(days)
+            }
+        });
+    }
+
     // 导出:全部任务(不含执行历史)。
     {
         let db_export = db.clone();

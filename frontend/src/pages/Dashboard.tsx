@@ -1,15 +1,22 @@
 import { useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { listTasks, listExecutions, type Task, type TaskExecution } from "@/api";
+import { listTasks, listExecutions, dailyStats, type Task, type TaskExecution, type DailyStat } from "@/api";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
 import { timeAgo, fullTime } from "@/lib/time";
 import { ListTodo, Play, CheckCircle2, AlertCircle } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, XAxis } from "recharts";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
 
 export default function Dashboard() {
-  const { data, loading, error, reload } = useApi<[Task[], TaskExecution[]]>(
-    () => Promise.all([listTasks(), listExecutions(undefined, 20)]),
+  const { data, loading, error, reload } = useApi<[Task[], TaskExecution[], DailyStat[]]>(
+    () => Promise.all([listTasks(), listExecutions(undefined, 20), dailyStats()]),
     [],
   );
 
@@ -23,7 +30,7 @@ export default function Dashboard() {
     if (error) toast.error(`Failed to load dashboard: ${error.message}`);
   }, [error]);
 
-  const [tasks, execs] = data ?? [[], []];
+  const [tasks, execs, daily] = data ?? [[], [], []];
   const enabled = tasks.filter((t) => t.enabled).length;
   const recent = execs.slice(0, 10);
   const taskName = (id: string) => tasks.find((t) => t.id === id)?.name ?? id.slice(0, 8);
@@ -41,6 +48,11 @@ export default function Dashboard() {
       </div>
     );
   }
+
+  const dailyChartConfig = {
+    success: { label: "Success", color: "var(--chart-2)" },
+    failure: { label: "Failed", color: "var(--chart-3)" },
+  } satisfies ChartConfig;
 
   const stats = [
     { label: "Total Tasks", value: tasks.length, icon: ListTodo, color: "text-primary", glow: "bg-primary/10", bar: "bg-primary" },
@@ -77,6 +89,36 @@ export default function Dashboard() {
           );
         })}
       </div>
+
+      <Card className="shadow-[var(--shadow-card)]">
+        <CardHeader>
+          <CardTitle>Executions — last 14 days</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ChartContainer
+            config={dailyChartConfig}
+            className="aspect-auto h-32 w-full"
+          >
+            <BarChart data={daily} margin={{ top: 8, right: 4, bottom: 0, left: 4 }}>
+              <CartesianGrid vertical={false} />
+              <XAxis
+                dataKey="date"
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                minTickGap={16}
+                tickFormatter={(v: string) => v.slice(5)}
+              />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              <Bar dataKey="success" stackId="a" fill="var(--color-success)" radius={[2, 2, 0, 0]} />
+              <Bar dataKey="failure" stackId="a" fill="var(--color-failure)" radius={[2, 2, 0, 0]} />
+            </BarChart>
+          </ChartContainer>
+          {daily.every((d) => d.success + d.failure === 0) && (
+            <p className="text-xs text-muted-foreground mt-2">No executions in the last 14 days.</p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card className="shadow-[var(--shadow-card)]">
         <CardHeader>
