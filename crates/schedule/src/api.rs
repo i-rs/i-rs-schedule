@@ -449,6 +449,37 @@ pub fn build_router(
         });
     }
 
+    // Cron 预览:返回未来 5 次触发时间(UTC ISO),供表单实时预览。
+    {
+        router.post("/api/cron/preview", move |mut req: Request| async move {
+            #[derive(Deserialize)]
+            struct CronPreview {
+                expr: String,
+                timezone: String,
+            }
+            let body: CronPreview = req
+                .body()
+                .await
+                .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
+            let tz = body
+                .timezone
+                .parse::<chrono_tz::Tz>()
+                .map_err(|e| err_msg(400, format!("invalid timezone: {e}")))?;
+            let schedule: cron::Schedule = body
+                .expr
+                .parse()
+                .map_err(|e| err_msg(400, format!("invalid cron expr: {e}")))?;
+            let times: Vec<String> = schedule
+                .upcoming(tz)
+                .take(5)
+                .map(|t| {
+                    t.with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+                })
+                .collect();
+            ok(serde_json::json!({ "times": times }))
+        });
+    }
+
     // 近 14 天每日执行统计(success/failure),供 Dashboard 图表。
     {
         let db_daily = db.clone();

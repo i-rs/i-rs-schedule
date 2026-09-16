@@ -14,7 +14,8 @@ import { useRef } from "react";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
 import { TaskDetailDrawer } from "@/components/TaskDetailDrawer";
-import { timeUntil } from "@/lib/time";
+import { timeUntil, formatInTz } from "@/lib/time";
+import { cronPreview } from "@/api";
 import { t as tr } from "@/lib/i18n";
 import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap, Loader2, Copy, Check, Bell, AlarmClock, Link2 } from "lucide-react";
 
@@ -74,11 +75,29 @@ export default function Tasks() {
   const [detailTask, setDetailTask] = useState<Task | null>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
+  const [cronPreviewState, setCronPreviewState] = useState<{ times: string[] } | { error: string } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (error) toast.error(`${tr("Failed to load tasks: ")}${error.message}`);
   }, [error]);
+
+  // cron 实时预览:输入停顿 400ms 后请求未来 5 次触发时间
+  useEffect(() => {
+    if (form.schedule_type !== "cron" || !form.cron_expr.trim()) {
+      setCronPreviewState(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const r = await cronPreview(form.cron_expr, form.timezone || "UTC");
+        setCronPreviewState({ times: r.times });
+      } catch (e) {
+        setCronPreviewState({ error: e instanceof Error ? e.message : String(e) });
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [form.cron_expr, form.timezone, form.schedule_type]);
 
   const handleSubmit = async () => {
     if (!form.name.trim()) {
@@ -465,6 +484,19 @@ export default function Tasks() {
                         </SelectContent>
                       </Select>
                     </div>
+                    {cronPreviewState && "times" in cronPreviewState && (
+                      <div className="text-xs text-muted-foreground space-y-0.5 tabular-nums">
+                        {cronPreviewState.times.map((iso) => (
+                          <div key={iso} className="flex items-center gap-1.5">
+                            <span className="text-emerald-500">▸</span>
+                            {formatInTz(iso, form.timezone || "UTC")}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {cronPreviewState && "error" in cronPreviewState && (
+                      <p className="text-xs text-destructive">{cronPreviewState.error}</p>
+                    )}
                     <details className="text-xs text-muted-foreground">
                       <summary className="cursor-pointer hover:text-foreground">Cron reference</summary>
                       <div className="mt-2 rounded-md border bg-muted/50 p-3 space-y-2 overflow-x-auto">
