@@ -403,7 +403,7 @@ impl Db {
                 "INSERT INTO tasks (id, name, task_type, enabled, schedule_type, cron_expr, delay_secs,
                  http_method, http_url, http_headers, http_body, shell_cmd, timezone, timeout_secs,
                  max_retries, trigger_task_ids, trigger_on, notify_type, notify_url, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
                 params![
                     task.id,
                     task.name,
