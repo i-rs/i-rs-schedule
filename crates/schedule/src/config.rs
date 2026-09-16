@@ -1,0 +1,103 @@
+use serde::Deserialize;
+
+/// `config.toml` 可选配置。优先级:环境变量 > 配置文件 > 默认值。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct FileConfig {
+    pub db_path: Option<String>,
+    pub port: Option<u16>,
+    pub token: Option<String>,
+    pub retention_days: Option<i64>,
+}
+
+impl FileConfig {
+    /// 从指定路径加载;文件不存在返回默认值,解析失败打 warn 并忽略。
+    pub fn load(path: &str) -> Self {
+        let text = match std::fs::read_to_string(path) {
+            Ok(t) => t,
+            Err(_) => return Self::default(),
+        };
+        match toml::from_str::<FileConfig>(&text) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(path = %path, error = %e, "invalid config file; ignoring");
+                Self::default()
+            }
+        }
+    }
+}
+
+/// 运行时生效配置:环境变量覆盖配置文件。
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub db_path: String,
+    pub port: u16,
+    pub token: Option<String>,
+    pub retention_days: i64,
+}
+
+impl Config {
+    pub fn load() -> Self {
+        let file = Self::load_file("config.toml");
+        let env = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty());
+
+        let db_path = env("SCHEDULE_DB")
+            .or(file.db_path)
+            .unwrap_or_else(|| "./data/schedule.db".to_string());
+        let port = env("SCHEDULE_PORT")
+            .and_then(|v| v.parse().ok())
+            .or(file.port)
+            .unwrap_or(3000);
+        let token = env("SCHEDULE_TOKEN").or(file.token);
+        let retention_days = env("RETENTION_DAYS")
+            .and_then(|v| v.parse().ok())
+            .or(file.retention_days)
+            .unwrap_or(30);
+
+        Self {
+            db_path,
+            port,
+            token,
+            retention_days,
+        }
+    }
+
+    fn load_file(path: &str) -> FileConfig {
+        FileConfig::load(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_toml_file() {
+        std::fs::write(
+            "/tmp/irs-config-test.toml",
+            "db_path = \"/tmp/x.db\"\nport = 8080\ntoken = \"abc\"\nretention_days = 7\n",
+        )
+        .unwrap();
+        let c = FileConfig::load("/tmp/irs-config-test.toml");
+        assert_eq!(c.db_path.as_deref(), Some("/tmp/x.db"));
+        assert_eq!(c.port, Some(8080));
+        assert_eq!(c.token.as_deref(), Some("abc"));
+        assert_eq!(c.retention_days, Some(7));
+        std::fs::remove_file("/tmp/irs-config-test.toml").unwrap();
+    }
+
+    #[test]
+    fn missing_file_yields_default() {
+        let c = FileConfig::load("/tmp/nonexistent-config.toml");
+        assert_eq!(c.port, None);
+        assert_eq!(c.retention_days, None);
+    }
+
+    #[test]
+    fn invalid_toml_ignored() {
+        std::fs::write("/tmp/irs-config-bad.toml", "not [valid toml {{{{").unwrap();
+        let c = FileConfig::load("/tmp/irs-config-bad.toml");
+        assert_eq!(c.port, None);
+        std::fs::remove_file("/tmp/irs-config-bad.toml").unwrap();
+    }
+}

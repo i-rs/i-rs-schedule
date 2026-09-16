@@ -1,4 +1,5 @@
 mod api;
+mod config;
 mod db;
 mod executor;
 mod notify;
@@ -14,17 +15,13 @@ use std::sync::Arc;
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let db_path = std::env::var("SCHEDULE_DB").unwrap_or_else(|_| "./data/schedule.db".to_string());
-    let port = std::env::var("SCHEDULE_PORT").unwrap_or_else(|_| "3000".to_string());
-    let addr = format!("127.0.0.1:{port}");
+    let config = config::Config::load();
+    let addr = format!("127.0.0.1:{}", config.port);
 
-    let db = Db::new(&db_path)?;
+    let db = Db::new(&config.db_path)?;
 
     // 执行记录保留策略:RETENTION_DAYS 天(默认 30),0 = 永久保留。
-    let retention_days: i64 = std::env::var("RETENTION_DAYS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(30);
+    let retention_days = config.retention_days;
     if retention_days > 0 {
         run_retention(&db, retention_days).await;
         let retention_db = db.clone();
@@ -54,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
         scheduler.run(cmd_rx, executor, scheduler_db).await;
     });
 
-    let router = api::build_router(db, cmd_tx.clone(), api_executor);
+    let router = api::build_router(db, cmd_tx.clone(), api_executor, config.token.clone());
 
     tracing::info!("starting server on http://{addr}");
 
