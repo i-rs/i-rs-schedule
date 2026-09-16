@@ -76,6 +76,11 @@ const zh: Record<string, string> = {
   Method: "方法",
   "Body (optional)": "请求体(可选)",
   Command: "命令",
+    "Trigger chain": "触发链",
+  "On success": "成功时",
+  "On failure": "失败时",
+  Always: "总是",
+  "Run the selected tasks when this task finishes.": "此任务结束时自动运行所选任务。",
   "On Success": "成功后",
   None: "无",
   "When this task succeeds, run the selected task automatically.":

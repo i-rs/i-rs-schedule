@@ -84,7 +84,10 @@ struct AddArgs {
     max_retries: i64,
 
     #[arg(long, default_value = "")]
-    trigger_on_success: String,
+    trigger_on_success: Vec<String>,
+
+    #[arg(long, default_value = "success")]
+    trigger_on: String,
 
     #[arg(long, default_value = "UTC")]
     timezone: String,
@@ -155,7 +158,8 @@ struct CreateTaskBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_retries: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    trigger_task_id: Option<String>,
+    trigger_task_ids: Option<Vec<String>>,
+    trigger_on: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     notify_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -223,7 +227,8 @@ async fn main() -> Result<()> {
                     timezone: Some(args.timezone),
                     timeout_secs: Some(args.timeout_secs),
                     max_retries: Some(args.max_retries),
-                    trigger_task_id: Some(args.trigger_on_success),
+                    trigger_task_ids: Some(args.trigger_on_success),
+                    trigger_on: Some(args.trigger_on),
                     notify_type: Some(args.notify_type),
                     notify_url: Some(args.notify_url),
                 };

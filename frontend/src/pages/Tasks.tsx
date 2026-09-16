@@ -32,7 +32,8 @@ interface TaskForm {
   timezone: string;
   timeout_secs: string;
   max_retries: string;
-  trigger_task_id: string;
+  trigger_task_ids: string[];
+  trigger_on: "success" | "failure" | "always";
   notify_type: "none" | "webhook" | "feishu" | "dingtalk";
   notify_url: string;
 }
@@ -50,7 +51,8 @@ const emptyForm: TaskForm = {
   timezone: "UTC",
   timeout_secs: "30",
   max_retries: "0",
-  trigger_task_id: "",
+  trigger_task_ids: [],
+  trigger_on: "success",
   notify_type: "none",
   notify_url: "",
 };
@@ -129,7 +131,8 @@ export default function Tasks() {
       timezone: form.timezone,
       timeout_secs: parseInt(form.timeout_secs) || 30,
       max_retries: parseInt(form.max_retries) || 0,
-      trigger_task_id: form.trigger_task_id,
+      trigger_task_ids: form.trigger_task_ids,
+      trigger_on: form.trigger_on,
       notify_type: form.notify_type,
       ...(form.notify_type !== "none" ? { notify_url: form.notify_url } : {}),
     };
@@ -169,7 +172,8 @@ export default function Tasks() {
       timezone: t.timezone || "UTC",
       timeout_secs: (t.timeout_secs ?? 30).toString(),
       max_retries: (t.max_retries ?? 0).toString(),
-      trigger_task_id: t.trigger_task_id ?? "",
+      trigger_task_ids: t.trigger_task_ids ?? [],
+      trigger_on: (t.trigger_on as TaskForm["trigger_on"]) || "success",
       notify_type: (t.notify_type as TaskForm["notify_type"]) || "none",
       notify_url: t.notify_url ?? "",
     });
@@ -343,7 +347,7 @@ export default function Tasks() {
                       {t.notify_type !== "none" && (
                         <Bell className="h-3 w-3 text-amber-400" />
                       )}
-                      {t.trigger_task_id && (
+                      {t.trigger_task_ids.length > 0 && (
                         <Link2 className="h-3 w-3 text-sky-400" />
                       )}
                     </div>
@@ -582,20 +586,41 @@ export default function Tasks() {
             )}
 
             <div className="space-y-1.5">
-              <Label>{tr("On Success")}</Label>
-              <Select value={form.trigger_task_id || "none"} onValueChange={(v) => setForm({ ...form, trigger_task_id: v && v !== "none" ? v : "" })}>
-                <SelectTrigger>
+              <Label>{tr("Trigger chain")}</Label>
+              <Select value={form.trigger_on} onValueChange={(v) => setForm({ ...form, trigger_on: v as TaskForm["trigger_on"] })}>
+                <SelectTrigger className="w-40">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">{tr("None")}</SelectItem>
-                  {tasks.filter((t) => t.id !== editingId).map((t) => (
-                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                  ))}
+                  <SelectItem value="success">{tr("On success")}</SelectItem>
+                  <SelectItem value="failure">{tr("On failure")}</SelectItem>
+                  <SelectItem value="always">{tr("Always")}</SelectItem>
                 </SelectContent>
               </Select>
+              {tasks.filter((t) => t.id !== editingId).length > 0 && (
+                <div className="rounded-lg border border-border/50 p-2.5 space-y-1.5 max-h-36 overflow-y-auto">
+                  {tasks.filter((t) => t.id !== editingId).map((t) => (
+                    <label key={t.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.trigger_task_ids.includes(t.id)}
+                        onChange={(e) => {
+                          setForm((f) => ({
+                            ...f,
+                            trigger_task_ids: e.target.checked
+                              ? [...f.trigger_task_ids, t.id]
+                              : f.trigger_task_ids.filter((id) => id !== t.id),
+                          }));
+                        }}
+                        className="accent-primary"
+                      />
+                      <span className="truncate">{t.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
               <p className="text-xs text-muted-foreground">
-                {tr("When this task succeeds, run the selected task automatically.")}
+                {tr("Run the selected tasks when this task finishes.")}
               </p>
             </div>
 

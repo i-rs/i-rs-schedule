@@ -2,6 +2,21 @@ use crate::db::{Db, Task, TaskExecution, TaskType};
 use crate::notify::Notifier;
 use std::time::Duration;
 
+/// 链式触发的上下文:触发方(上游)的最终输出与状态。
+#[derive(Debug, Clone)]
+pub struct TriggerContext {
+    pub output: String,
+    pub status: String,
+}
+
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", s.chars().take(max).collect::<String>())
+    }
+}
+
 pub struct ExecutionResult {
     pub status: String,
     pub output: String,
@@ -31,7 +46,12 @@ impl Executor {
         }
     }
 
-    pub async fn execute(&self, task: &Task) -> ExecutionResult {
+    /// 执行任务;Shell 命令支持 {{trigger.output}} / {{trigger.status}} 插值(仅链式触发时有值)。
+    async fn execute_with_trigger(
+        &self,
+        task: &Task,
+        trigger: Option<&TriggerContext>,
+    ) -> ExecutionResult {
         match &task.task_type {
             TaskType::Http {
                 method,
@@ -43,7 +63,13 @@ impl Executor {
                     .await
             }
             TaskType::Shell { cmd } => {
-                Self::execute_shell(cmd, Duration::from_secs(task.timeout_secs)).await
+                let cmd = match trigger {
+                    Some(ctx) => cmd
+                        .replace("{{trigger.output}}", &truncate_str(&ctx.output, 10000))
+                        .replace("{{trigger.status}}", &ctx.status),
+                    None => cmd.clone(),
+                };
+                Self::execute_shell(&cmd, Duration::from_secs(task.timeout_secs)).await
             }
         }
     }
@@ -54,7 +80,7 @@ impl Executor {
     /// create_execution 失败时返回一个内存构造的 `status="skipped"` 记录(不入库),
     /// 并打 warn 日志;execute 与 update_execution 的失败均告警但不影响返回。
     pub async fn execute_and_record(&self, db: &Db, task: &Task) -> TaskExecution {
-        self.execute_and_record_depth(db, task, 0).await
+        self.execute_and_record_depth(db, task, 0, None).await
     }
 
     /// depth 用于链式触发的环防护(最大 10 层)。装箱返回以打破递归 future 的 Send 推导。
@@ -63,8 +89,9 @@ impl Executor {
         db: &'a Db,
         task: &'a Task,
         depth: u32,
+        trigger: Option<TriggerContext>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TaskExecution> + Send + 'a>> {
-        Box::pin(self.execute_and_record_depth_impl(db, task, depth))
+        Box::pin(self.execute_and_record_depth_impl(db, task, depth, trigger))
     }
 
     async fn execute_and_record_depth_impl(
@@ -72,9 +99,12 @@ impl Executor {
         db: &Db,
         task: &Task,
         depth: u32,
+        trigger: Option<TriggerContext>,
     ) -> TaskExecution {
         let mut attempt: i64 = 0;
-        let (mut final_exec, mut duration_ms) = self.execute_attempt(db, task, attempt).await;
+        let (mut final_exec, mut duration_ms) = self
+            .execute_attempt(db, task, attempt, trigger.clone())
+            .await;
         // 失败且还有重试额度:指数退避后重试(30s 起步,封顶 8 分钟)。
         while final_exec.status == "failure" && attempt < task.max_retries {
             let backoff = Duration::from_secs((30u64 << attempt.min(4)).min(480));
@@ -86,7 +116,9 @@ impl Executor {
             );
             tokio::time::sleep(backoff).await;
             attempt += 1;
-            let (exec, ms) = self.execute_attempt(db, task, attempt).await;
+            let (exec, ms) = self
+                .execute_attempt(db, task, attempt, trigger.clone())
+                .await;
             final_exec = exec;
             duration_ms = ms;
         }
@@ -105,28 +137,41 @@ impl Executor {
             }
         }
 
-        // 依赖链:成功后触发下游任务(带深度防护)。
-        if final_exec.status == "success" && !task.trigger_task_id.is_empty() && depth < 10 {
-            if let Ok(Some(next)) = db.get_task(&task.trigger_task_id).await {
-                if next.enabled {
-                    tracing::info!(
-                        from = %task.id,
-                        to = %next.id,
-                        depth,
-                        "triggering downstream task"
-                    );
-                    let exec = self.clone();
-                    let next_db = db.clone();
-                    tokio::spawn(async move {
-                        let _ = exec
-                            .execute_and_record_depth(&next_db, &next, depth + 1)
-                            .await;
-                    });
+        // 依赖链:按策略触发下游任务(带深度防护)。
+        let policy_matched = match task.trigger_on.as_str() {
+            "failure" => final_exec.status == "failure",
+            "always" => true,
+            _ => final_exec.status == "success",
+        };
+        if policy_matched && !task.trigger_task_ids.is_empty() && depth < 10 {
+            let ctx = TriggerContext {
+                output: final_exec.output.clone().unwrap_or_default(),
+                status: final_exec.status.clone(),
+            };
+            for next_id in &task.trigger_task_ids {
+                if let Ok(Some(next)) = db.get_task(next_id).await {
+                    if next.enabled {
+                        tracing::info!(
+                            from = %task.id,
+                            to = %next.id,
+                            depth,
+                            "triggering downstream task"
+                        );
+                        let exec = self.clone();
+                        let next_db = db.clone();
+                        let next = next.clone();
+                        let ctx = ctx.clone();
+                        tokio::spawn(async move {
+                            let _ = exec
+                                .execute_and_record_depth(&next_db, &next, depth + 1, Some(ctx))
+                                .await;
+                        });
+                    } else {
+                        tracing::warn!(task_id = %next_id, "downstream task disabled; skipping trigger");
+                    }
                 } else {
-                    tracing::warn!(task_id = %task.trigger_task_id, "downstream task disabled; skipping trigger");
+                    tracing::warn!(task_id = %next_id, "downstream task missing; skipping trigger");
                 }
-            } else {
-                tracing::warn!(task_id = %task.trigger_task_id, "downstream task missing; skipping trigger");
             }
         }
 
@@ -134,7 +179,13 @@ impl Executor {
     }
 
     /// 执行单次尝试并落库,返回(记录, 本次耗时)。
-    async fn execute_attempt(&self, db: &Db, task: &Task, attempt: i64) -> (TaskExecution, u64) {
+    async fn execute_attempt(
+        &self,
+        db: &Db,
+        task: &Task,
+        attempt: i64,
+        trigger: Option<TriggerContext>,
+    ) -> (TaskExecution, u64) {
         let exec_id = uuid::Uuid::new_v4().to_string();
         let started_at = crate::db::now_iso();
         let start = std::time::Instant::now();
@@ -171,7 +222,7 @@ impl Executor {
             "execution started"
         );
 
-        let result = self.execute(task).await;
+        let result = self.execute_with_trigger(task, trigger.as_ref()).await;
 
         if let Err(e) = db
             .update_execution(&exec_id, &result.status, &result.output, result.http_status)
