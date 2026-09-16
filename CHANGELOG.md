@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.3.0 「可运营」(2026-09-16)
+
+部署与运维标准化。
+
+### 新增
+
+- **健康检查与指标**:`GET /healthz` 探活;`GET /metrics` 输出 Prometheus 文本格式(执行总数/成功/失败计数、启用任务 gauge)
+- **Docker 部署**:多阶段 Dockerfile + docker-compose(数据卷、healthcheck、token 示例)
+- **CI**:GitHub Actions(cargo fmt/clippy -D warnings/test/build + 前端 lint/build)
+- **config.toml**:可选配置文件(db_path/port/token/retention_days),优先级 环境变量 > 文件 > 默认值
+- **测试套件**:9 个单元测试(时区数学、cron/时区校验、next_run_at 语义、config 解析),`cargo test` 进 CI
+
 ## v0.2.0 「顺手」(2026-09-16)
 
 日常使用无摩擦:时区、重试、可视化调度信息、数据可迁移。
