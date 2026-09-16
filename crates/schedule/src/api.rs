@@ -63,7 +63,8 @@ struct CreateTaskRequest {
     timezone: Option<String>,
     timeout_secs: Option<u64>,
     max_retries: Option<i64>,
-    trigger_task_id: Option<String>,
+    trigger_task_ids: Option<Vec<String>>,
+    trigger_on: Option<String>,
     notify_type: Option<String>,
     notify_url: Option<String>,
 }
@@ -112,9 +113,13 @@ fn build_task_with_hint(body: CreateTaskRequest, id_hint: String) -> Result<Task
     if !(0..=10).contains(&max_retries) {
         return Err("max_retries must be between 0 and 10".into());
     }
-    let trigger_task_id = body.trigger_task_id.unwrap_or_default();
-    if !trigger_task_id.is_empty() && trigger_task_id == id_hint {
+    let trigger_task_ids = body.trigger_task_ids.unwrap_or_default();
+    if trigger_task_ids.contains(&id_hint) {
         return Err("a task cannot trigger itself".into());
+    }
+    let trigger_on = body.trigger_on.unwrap_or_else(|| "success".into());
+    if !matches!(trigger_on.as_str(), "success" | "failure" | "always") {
+        return Err(format!("invalid trigger_on: {trigger_on}"));
     }
 
     let notify_type = body.notify_type.unwrap_or_else(|| "none".into());
@@ -140,7 +145,8 @@ fn build_task_with_hint(body: CreateTaskRequest, id_hint: String) -> Result<Task
     task.timezone = timezone;
     task.timeout_secs = timeout_secs;
     task.max_retries = max_retries;
-    task.trigger_task_id = trigger_task_id;
+    task.trigger_task_ids = trigger_task_ids;
+    task.trigger_on = trigger_on;
     Ok(task)
 }
 
@@ -177,10 +183,16 @@ async fn check_trigger_chain(db: &Db, source_id: &str, target_id: &str) -> Resul
         }
         match db.get_task(&current).await {
             Ok(Some(t)) => {
-                if t.trigger_task_id.is_empty() {
+                if t.trigger_task_ids.is_empty() {
                     return Ok(());
                 }
-                current = t.trigger_task_id;
+                for next in &t.trigger_task_ids {
+                    if next == source_id {
+                        return Err(err_msg(400, "circular trigger chain"));
+                    }
+                }
+                // 多下游时逐支检查太深,这里沿第一个下游继续(足够防环)
+                current = t.trigger_task_ids[0].clone();
             }
             Ok(None) => return Err(err_msg(400, format!("trigger target {current} not found"))),
             Err(e) => return Err(err_msg(500, format!("db error: {e}"))),
@@ -211,8 +223,8 @@ pub fn build_router(
                 .await
                 .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
             let task = build_task(body).map_err(|e| err_msg(400, e))?;
-            if !task.trigger_task_id.is_empty() {
-                check_trigger_chain(&db, &task.id, &task.trigger_task_id).await?;
+            for target in &task.trigger_task_ids {
+                check_trigger_chain(&db, &task.id, target).await?;
             }
             db.create_task(&task)
                 .await
@@ -266,8 +278,8 @@ pub fn build_router(
                 .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
             let mut task = build_task_with_hint(body, id.clone()).map_err(|e| err_msg(400, e))?;
             task.id = id.clone();
-            if !task.trigger_task_id.is_empty() {
-                check_trigger_chain(&db, &id, &task.trigger_task_id).await?;
+            for target in &task.trigger_task_ids {
+                check_trigger_chain(&db, &id, target).await?;
             }
             task.updated_at = crate::db::now_iso();
             db.update_task(&task)
@@ -512,7 +524,8 @@ pub fn build_router(
                 .upcoming(tz)
                 .take(5)
                 .map(|t| {
-                    t.with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+                    t.with_timezone(&chrono::Utc)
+                        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
                 })
                 .collect();
             ok(serde_json::json!({ "times": times }))

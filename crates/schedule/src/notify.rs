@@ -34,7 +34,10 @@ impl Notifier {
         let title = title.to_string();
         let this = self.clone();
         tokio::spawn(async move {
-            if let Err(detail) = this.send_sync(&task, &event, &title, &exec, duration_ms).await {
+            if let Err(detail) = this
+                .send_sync(&task, &event, &title, &exec, duration_ms)
+                .await
+            {
                 tracing::warn!(event = %event, detail = %detail, "notification delivery failed");
             }
         });

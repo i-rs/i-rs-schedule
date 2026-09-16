@@ -109,9 +109,9 @@ export function TaskDetailDrawer({ task, onClose }: { task: Task | null; onClose
                     <Bell className="h-3 w-3" /> {task.notify_type}
                   </span>
                 )}
-                {task.trigger_task_id && (
+                {task.trigger_task_ids.length > 0 && (
                   <span className="inline-flex items-center gap-1 text-sky-400">
-                    <Link2 className="h-3 w-3" /> {t("On Success")}
+                    <Link2 className="h-3 w-3" /> {t("Trigger chain")}
                   </span>
                 )}
               </div>
