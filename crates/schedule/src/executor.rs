@@ -15,6 +15,11 @@ pub struct Executor {
 }
 
 impl Executor {
+    /// 通知器访问(通知测试端点用)。
+    pub fn notifier(&self) -> &Notifier {
+        &self.notifier
+    }
+
     pub fn new() -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))

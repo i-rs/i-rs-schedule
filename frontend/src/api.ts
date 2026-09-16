@@ -168,3 +168,9 @@ export async function cronPreview(expr: string, timezone: string): Promise<{ tim
     body: JSON.stringify({ expr, timezone }),
   });
 }
+
+export async function testNotification(id: string): Promise<{ delivered: boolean; detail: string }> {
+  return request<{ delivered: boolean; detail: string }>(`/api/tasks/${id}/notify-test`, {
+    method: "POST",
+  });
+}
