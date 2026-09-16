@@ -14,7 +14,7 @@ import { useRef } from "react";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
 import { timeUntil } from "@/lib/time";
-import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap, Loader2, Copy, Check, Bell, AlarmClock } from "lucide-react";
+import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap, Loader2, Copy, Check, Bell, AlarmClock, Link2 } from "lucide-react";
 
 interface TaskForm {
   name: string;
@@ -29,6 +29,7 @@ interface TaskForm {
   timezone: string;
   timeout_secs: string;
   max_retries: string;
+  trigger_task_id: string;
   notify_type: "none" | "webhook" | "feishu" | "dingtalk";
   notify_url: string;
 }
@@ -46,6 +47,7 @@ const emptyForm: TaskForm = {
   timezone: "UTC",
   timeout_secs: "30",
   max_retries: "0",
+  trigger_task_id: "",
   notify_type: "none",
   notify_url: "",
 };
@@ -104,6 +106,7 @@ export default function Tasks() {
       timezone: form.timezone,
       timeout_secs: parseInt(form.timeout_secs) || 30,
       max_retries: parseInt(form.max_retries) || 0,
+      trigger_task_id: form.trigger_task_id,
       notify_type: form.notify_type,
       ...(form.notify_type !== "none" ? { notify_url: form.notify_url } : {}),
     };
@@ -143,6 +146,7 @@ export default function Tasks() {
       timezone: t.timezone || "UTC",
       timeout_secs: (t.timeout_secs ?? 30).toString(),
       max_retries: (t.max_retries ?? 0).toString(),
+      trigger_task_id: t.trigger_task_id ?? "",
       notify_type: (t.notify_type as TaskForm["notify_type"]) || "none",
       notify_url: t.notify_url ?? "",
     });
@@ -314,6 +318,9 @@ export default function Tasks() {
                       )}
                       {t.notify_type !== "none" && (
                         <Bell className="h-3 w-3 text-amber-400" />
+                      )}
+                      {t.trigger_task_id && (
+                        <Link2 className="h-3 w-3 text-sky-400" />
                       )}
                     </div>
                     <div className="flex items-center gap-1.5 min-w-0">
@@ -533,6 +540,24 @@ export default function Tasks() {
                 />
               </div>
             )}
+
+            <div className="space-y-1.5">
+              <Label>On Success</Label>
+              <Select value={form.trigger_task_id || "none"} onValueChange={(v) => setForm({ ...form, trigger_task_id: v && v !== "none" ? v : "" })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {tasks.filter((t) => t.id !== editingId).map((t) => (
+                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                When this task succeeds, run the selected task automatically.
+              </p>
+            </div>
 
             <div className="space-y-1.5">
               <Label>Notification</Label>

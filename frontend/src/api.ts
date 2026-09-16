@@ -7,6 +7,7 @@ export interface Task {
   timezone: string;
   timeout_secs: number;
   max_retries: number;
+  trigger_task_id: string;
   next_run_at: string | null;
   notify_type: string;
   notify_url: string;
@@ -83,6 +84,7 @@ export interface CreateTaskPayload {
   timezone?: string;
   timeout_secs?: number;
   max_retries?: number;
+  trigger_task_id?: string;
   notify_type?: string;
   notify_url?: string;
 }
