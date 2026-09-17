@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 import {
   listApiTokens,
   createApiToken,
@@ -10,8 +11,12 @@ import {
   listAudit,
   getMaintenance,
   setMaintenance,
+  listVars,
+  setVar,
+  deleteVar,
   type ApiTokenInfo,
   type AuditEntry,
+  type VarInfo,
 } from "@/api";
 import { toast } from "@/hooks/useToast";
 import { timeAgo } from "@/lib/time";
@@ -25,12 +30,17 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [newName, setNewName] = useState("");
   const [minted, setMinted] = useState<string | null>(null);
   const [maintenance, setMaintenanceState] = useState(false);
+  const [vars, setVars] = useState<VarInfo[]>([]);
+  const [varKey, setVarKey] = useState("");
+  const [varValue, setVarValue] = useState("");
+  const [varSecret, setVarSecret] = useState(false);
 
   const load = async () => {
     try {
       setTokens(await listApiTokens());
       setAudit(await listAudit(50));
       setMaintenanceState((await getMaintenance()).enabled);
+      setVars(await listVars());
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
@@ -72,6 +82,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           <TabsList className="w-full">
             <TabsTrigger value="tokens" className="flex-1">{t("API Tokens")}</TabsTrigger>
             <TabsTrigger value="audit" className="flex-1">{t("Audit Log")}</TabsTrigger>
+            <TabsTrigger value="vars" className="flex-1">{t("Variables")}</TabsTrigger>
           </TabsList>
 
           <div className="mt-3 space-y-3">
@@ -163,6 +174,75 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                 </Button>
               </div>
             </div>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            <div className="flex gap-2">
+              <Input
+                value={varKey}
+                onChange={(e) => setVarKey(e.target.value)}
+                placeholder="API_KEY"
+                className="flex-1 font-mono text-xs"
+              />
+              <Input
+                value={varValue}
+                onChange={(e) => setVarValue(e.target.value)}
+                placeholder={t("Value")}
+                className="flex-1 font-mono text-xs"
+                type={varSecret ? "password" : "text"}
+              />
+              <label className="flex items-center gap-1 text-xs text-muted-foreground whitespace-nowrap cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={varSecret}
+                  onChange={(e) => setVarSecret(e.target.checked)}
+                  className="h-3.5 w-3.5 accent-[var(--primary)]"
+                />
+                {t("Secret")}
+              </label>
+              <Button size="sm" disabled={!varKey.trim() || varValue === ""}
+                onClick={async () => {
+                  try {
+                    await setVar(varKey.trim(), varValue, varSecret);
+                    setVarKey("");
+                    setVarValue("");
+                    setVars(await listVars());
+                  } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); }
+                }}>
+                <Plus className="h-4 w-4" /> {t("Create")}
+              </Button>
+            </div>
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {vars.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-2 text-center">{t("No variables")}</p>
+              ) : (
+                vars.map((v) => (
+                  <div key={v.key} className="flex items-center justify-between rounded-md border border-border/50 px-2.5 py-1.5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <code className="text-xs font-mono">{v.key}</code>
+                      {v.is_secret && <Badge variant="secondary" className="text-[10px]">{t("Secret")}</Badge>}
+                    </div>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <code className="text-xs text-muted-foreground font-mono truncate max-w-[40%]">
+                        {v.is_secret ? "••••••" : v.value}
+                      </code>
+                      <Button size="icon-sm" variant="ghost" title={t("Delete")}
+                        onClick={async () => {
+                          try {
+                            await deleteVar(v.key);
+                            setVars(await listVars());
+                          } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); }
+                        }}>
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              {t("Use {{var.key}} in shell commands and HTTP fields.")}
+            </p>
           </div>
         </Tabs>
       </DialogContent>

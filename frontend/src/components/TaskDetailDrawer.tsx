@@ -1,16 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getTaskStats, listTaskExecutions, type Task, type TaskExecution } from "@/api";
+import { getTaskStats, listTaskExecutions, enableHook, disableHook, getHook, type Task, type TaskExecution } from "@/api";
 import { useApi } from "@/hooks/useApi";
 import { LiveTerminal } from "@/components/LiveTerminal";
+import { toast } from "@/hooks/useToast";
 import { t, tf, useLang } from "@/lib/i18n";
 import { timeAgo, fullTime } from "@/lib/time";
 import { fmtDuration } from "@/lib/duration";
-import { Globe, Terminal, Clock, Bell, Link2, ChevronDown, ChevronUp } from "lucide-react";
+import { Globe, Terminal, Clock, Bell, Link2, ChevronDown, ChevronUp, Webhook, Copy, Check } from "lucide-react";
 
 function fmtMs(ms: number | null): string {
   if (ms == null) return "—";
@@ -69,6 +70,23 @@ export function TaskDetailDrawer({ task, onClose }: { task: Task | null; onClose
   const [limit, setLimit] = useState(20);
   const lang = useLang();
   void lang;
+
+  const [hookState, setHookState] = useState<{ enabled: boolean } | null>(null);
+  const [hookUrl, setHookUrl] = useState<string | null>(null);
+  const [hookCopied, setHookCopied] = useState(false);
+  const [hookBusy, setHookBusy] = useState(false);
+
+  useEffect(() => {
+    if (!task) {
+      setHookState(null);
+      setHookUrl(null);
+      return;
+    }
+    getHook(task.id)
+      .then(setHookState)
+      .catch(() => setHookState(null));
+    setHookUrl(null);
+  }, [task?.id]);
 
   const { data: stats, reload: statsReload } = useApi(
     () => (task ? getTaskStats(task.id) : Promise.resolve(null)),
@@ -141,6 +159,88 @@ export function TaskDetailDrawer({ task, onClose }: { task: Task | null; onClose
               </div>
               <div className="text-xs text-muted-foreground -mt-3">
                 {t("Avg duration")}: <span className="tabular-nums">{fmtMs(stats?.avg_duration_ms ?? null)}</span>
+              </div>
+
+              {/* Webhook 触发 */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium inline-flex items-center gap-1.5">
+                    <Webhook className="h-3.5 w-3.5" /> {t("Webhook trigger")}
+                  </p>
+                  {hookState?.enabled && !hookUrl && (
+                    <span className="text-[10px] text-emerald-500 font-medium">● {t("Enabled")}</span>
+                  )}
+                </div>
+                {hookUrl ? (
+                  <div className="rounded-md border border-primary/40 bg-primary/5 p-2 space-y-1.5">
+                    <p className="text-[10px] text-muted-foreground">
+                      {t("Copy this URL now — the secret is shown only once.")}
+                    </p>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <code className="text-[10px] font-mono truncate flex-1 break-all">{hookUrl}</code>
+                      <button
+                        title={t("Copy")}
+                        onClick={async () => {
+                          await navigator.clipboard.writeText(hookUrl);
+                          setHookCopied(true);
+                          setTimeout(() => setHookCopied(false), 1500);
+                        }}
+                        className="shrink-0 text-muted-foreground hover:text-foreground cursor-pointer"
+                      >
+                        {hookCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={hookBusy}
+                      className="h-7 text-xs"
+                      onClick={async () => {
+                        if (!task) return;
+                        setHookBusy(true);
+                        try {
+                          const r = await enableHook(task.id);
+                          setHookUrl(`${window.location.origin}${r.path}`);
+                          setHookState({ enabled: true });
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : String(e));
+                        } finally {
+                          setHookBusy(false);
+                        }
+                      }}
+                    >
+                      {hookState?.enabled ? t("Rotate secret") : t("Enable")}
+                    </Button>
+                    {hookState?.enabled && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={hookBusy}
+                        className="h-7 text-xs text-destructive"
+                        onClick={async () => {
+                          if (!task) return;
+                          setHookBusy(true);
+                          try {
+                            await disableHook(task.id);
+                            setHookState({ enabled: false });
+                          } catch (e) {
+                            toast.error(e instanceof Error ? e.message : String(e));
+                          } finally {
+                            setHookBusy(false);
+                          }
+                        }}
+                      >
+                        {t("Disable")}
+                      </Button>
+                    )}
+                  </div>
+                )}
+                <p className="text-[10px] text-muted-foreground">
+                  {t("POST to this URL to run the task. Use {{event.body}} / {{event.query.x}} in the command.")}
+                </p>
               </div>
 
               {/* 执行历史 */}

@@ -10,6 +10,7 @@ export interface Task {
   max_concurrent: number;
   trigger_task_ids: string[];
   tags: string[];
+  missed_alert: boolean;
   trigger_on: string;
   next_run_at: string | null;
   notify_type: string;
@@ -40,6 +41,25 @@ export interface LiveSnapshot {
 /** 长轮询获取执行实时输出:cursor 为已见版本号,服务端最多 hold 25s。 */
 export async function getLiveOutput(id: string, cursor: number, signal?: AbortSignal): Promise<LiveSnapshot> {
   return request(`/api/executions/${id}/live?cursor=${cursor}`, { signal });
+}
+
+export interface VarInfo {
+  key: string;
+  value: string | null;
+  is_secret: boolean;
+}
+
+/** 全局变量(is_secret 的 value 永不返回)。 */
+export async function listVars(): Promise<VarInfo[]> {
+  return request("/api/vars");
+}
+
+export async function setVar(key: string, value: string, is_secret: boolean): Promise<void> {
+  await request("/api/vars", { method: "POST", body: JSON.stringify({ key, value, is_secret }) });
+}
+
+export async function deleteVar(key: string): Promise<void> {
+  await request(`/api/vars/${encodeURIComponent(key)}`, { method: "DELETE" });
 }
 
 /** 维护模式:暂停期间 cron 不派发、once 到期记 skipped。 */
@@ -117,6 +137,7 @@ export interface CreateTaskPayload {
   max_concurrent?: number;
   trigger_task_ids?: string[];
   tags?: string[];
+  missed_alert?: boolean;
   trigger_on?: string;
   notify_type?: string;
   notify_url?: string;
@@ -146,6 +167,23 @@ export async function runTask(id: string): Promise<TaskExecution> {
 
 export async function enableTask(id: string): Promise<void> {
   await request(`/api/tasks/${id}/enable`, { method: "POST" });
+}
+
+export interface HookConfig {
+  enabled: boolean;
+}
+
+/** Webhook 触发:开启/轮换(secret 明文仅返回一次)。 */
+export async function enableHook(id: string): Promise<{ secret: string; path: string }> {
+  return request(`/api/tasks/${id}/hook`, { method: "POST" });
+}
+
+export async function disableHook(id: string): Promise<void> {
+  await request(`/api/tasks/${id}/hook`, { method: "DELETE" });
+}
+
+export async function getHook(id: string): Promise<HookConfig> {
+  return request(`/api/tasks/${id}/hook`);
 }
 
 /** 批量操作:enable | disable | delete */

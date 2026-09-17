@@ -43,6 +43,12 @@ pub struct Task {
     /// 标签(JSON 数组),组织与批量操作用
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Webhook 触发 secret 的 sha256(仅哈希入库,永不出 API)
+    #[serde(skip_serializing)]
+    pub hook_secret_hash: Option<String>,
+    /// 漏跑告警:到期后宽限期内无任何执行尝试则推送(cron 任务有效)
+    #[serde(default)]
+    pub missed_alert: bool,
     pub trigger_on: String,
     #[serde(rename = "notify_type")]
     pub notify_type: String,
@@ -93,6 +99,8 @@ impl Task {
             max_concurrent: 1,
             trigger_task_ids: Vec::new(),
             tags: Vec::new(),
+            hook_secret_hash: None,
+            missed_alert: false,
             trigger_on: "success".into(),
             notify_type: "none".to_string(),
             notify_url: String::new(),
@@ -100,6 +108,14 @@ impl Task {
             updated_at: now,
         }
     }
+}
+
+/// 全局变量(插值用);is_secret 的 value 永不通过 API 返回。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Variable {
+    pub key: String,
+    pub value: String,
+    pub is_secret: bool,
 }
 
 #[derive(Clone)]
@@ -156,6 +172,8 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     let trigger_task_ids: Vec<String> = serde_json::from_str(&trigger_ids_raw).unwrap_or_default();
     let tags_raw: String = row.get("tags")?;
     let tags: Vec<String> = serde_json::from_str(&tags_raw).unwrap_or_default();
+    let hook_secret_hash: Option<String> = row.get("hook_secret_hash")?;
+    let missed_alert: bool = row.get::<_, i64>("missed_alert")? != 0;
     let trigger_on: String = row.get("trigger_on")?;
     let notify_type: String = row.get("notify_type")?;
     let notify_url: String = row.get("notify_url")?;
@@ -193,6 +211,8 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         max_concurrent,
         trigger_task_ids,
         tags,
+        hook_secret_hash,
+        missed_alert,
         trigger_on,
         notify_type,
         notify_url,
@@ -255,6 +275,8 @@ impl Db {
                 max_concurrent INTEGER NOT NULL DEFAULT 1,
                 trigger_task_ids TEXT NOT NULL DEFAULT '[]', -- 成功后触发的下游任务(id 数组)
                 tags         TEXT NOT NULL DEFAULT '[]', -- 标签(JSON 数组)
+                hook_secret_hash TEXT, -- Webhook 触发 secret 的 sha256(NULL = 未开启)
+                missed_alert INTEGER NOT NULL DEFAULT 0, -- 漏跑告警
                 trigger_on   TEXT NOT NULL DEFAULT 'success',
                 notify_type TEXT NOT NULL DEFAULT 'none',
                 notify_url  TEXT NOT NULL DEFAULT '',
@@ -302,6 +324,12 @@ impl Db {
             CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS variables (
+                key       TEXT PRIMARY KEY,
+                value     TEXT NOT NULL,
+                is_secret INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE INDEX IF NOT EXISTS idx_task_executions_task_id ON task_executions(task_id);
@@ -362,6 +390,17 @@ impl Db {
                 [],
             )?;
             tracing::info!("migrated tasks table: added tags");
+        }
+        if !existing.iter().any(|c| c == "hook_secret_hash") {
+            conn.execute("ALTER TABLE tasks ADD COLUMN hook_secret_hash TEXT", [])?;
+            tracing::info!("migrated tasks table: added hook_secret_hash");
+        }
+        if !existing.iter().any(|c| c == "missed_alert") {
+            conn.execute(
+                "ALTER TABLE tasks ADD COLUMN missed_alert INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+            tracing::info!("migrated tasks table: added missed_alert");
         }
         if !existing.iter().any(|c| c == "trigger_on") {
             conn.execute(
@@ -465,9 +504,9 @@ impl Db {
             conn.execute(
                 "INSERT INTO tasks (id, name, task_type, enabled, schedule_type, cron_expr, delay_secs,
                  http_method, http_url, http_headers, http_body, shell_cmd, timezone, timeout_secs,
-                 max_retries, max_concurrent, trigger_task_ids, tags, trigger_on, notify_type,
-                 notify_url, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                 max_retries, max_concurrent, trigger_task_ids, tags, hook_secret_hash,
+                 missed_alert, trigger_on, notify_type, notify_url, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
                 params![
                     task.id,
                     task.name,
@@ -487,6 +526,8 @@ impl Db {
                     task.max_concurrent,
                     serde_json::to_string(&task.trigger_task_ids).unwrap(),
                     serde_json::to_string(&task.tags).unwrap(),
+                    task.hook_secret_hash,
+                    task.missed_alert as i64,
                     task.trigger_on,
                     task.notify_type,
                     task.notify_url,
@@ -570,8 +611,8 @@ impl Db {
                 "UPDATE tasks SET name=?1, task_type=?2, enabled=?3, schedule_type=?4, cron_expr=?5,
                  delay_secs=?6, http_method=?7, http_url=?8, http_headers=?9, http_body=?10,
                  shell_cmd=?11, timezone=?12, timeout_secs=?13, max_retries=?14, max_concurrent=?15,
-                 trigger_task_ids=?16, tags=?17, trigger_on=?18, notify_type=?19, notify_url=?20,
-                 updated_at=?21 WHERE id=?22",
+                 trigger_task_ids=?16, tags=?17, hook_secret_hash=?18, missed_alert=?19,
+                 trigger_on=?20, notify_type=?21, notify_url=?22, updated_at=?23 WHERE id=?24",
                 params![
                     task.name,
                     task_type_str,
@@ -590,6 +631,8 @@ impl Db {
                     task.max_concurrent,
                     serde_json::to_string(&task.trigger_task_ids).unwrap(),
                     serde_json::to_string(&task.tags).unwrap(),
+                    task.hook_secret_hash,
+                    task.missed_alert as i64,
                     task.trigger_on,
                     task.notify_type,
                     task.notify_url,
@@ -1007,6 +1050,87 @@ impl Db {
         spawn_db(pool, move |conn| {
             conn.execute("VACUUM INTO ?1", params![target])?;
             Ok(())
+        })
+        .await
+    }
+
+    /// 列出全部变量(含 secret 明文,仅供执行插值;API 层负责打码)。
+    pub async fn list_variables(&self) -> anyhow::Result<Vec<Variable>> {
+        let pool = self.pool.clone();
+        spawn_db(pool, move |conn| {
+            let mut stmt =
+                conn.prepare("SELECT key, value, is_secret FROM variables ORDER BY key")?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(Variable {
+                        key: r.get("key")?,
+                        value: r.get("value")?,
+                        is_secret: r.get::<_, i64>("is_secret")? != 0,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await
+    }
+
+    /// 写入/更新一个变量(幂等 upsert)。
+    pub async fn upsert_variable(&self, var: &Variable) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let var = var.clone();
+        spawn_db(pool, move |conn| {
+            conn.execute(
+                "INSERT INTO variables (key, value, is_secret) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                 is_secret = excluded.is_secret",
+                params![var.key, var.value, var.is_secret as i64],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// 删除一个变量,返回是否删除。
+    pub async fn delete_variable(&self, key: &str) -> anyhow::Result<bool> {
+        let pool = self.pool.clone();
+        let key = key.to_string();
+        spawn_db(pool, move |conn| {
+            let n = conn.execute("DELETE FROM variables WHERE key = ?1", params![key])?;
+            Ok(n > 0)
+        })
+        .await
+    }
+
+    /// 期望时间之后是否已有任何执行尝试(含失败)。
+    pub async fn has_execution_since(
+        &self,
+        task_id: &str,
+        since_iso: &str,
+    ) -> anyhow::Result<bool> {
+        let pool = self.pool.clone();
+        let (task_id, since_iso) = (task_id.to_string(), since_iso.to_string());
+        spawn_db(pool, move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT 1 FROM task_executions WHERE task_id = ?1 AND started_at >= ?2 LIMIT 1",
+            )?;
+            let found = stmt
+                .query_row(params![task_id, since_iso], |_| Ok(()))
+                .is_ok();
+            Ok(found)
+        })
+        .await
+    }
+
+    /// 设置/清除任务的 Webhook secret 哈希,返回任务是否存在。
+    pub async fn set_hook_secret(&self, id: &str, hash: Option<String>) -> anyhow::Result<bool> {
+        let pool = self.pool.clone();
+        let id = id.to_string();
+        spawn_db(pool, move |conn| {
+            let n = conn.execute(
+                "UPDATE tasks SET hook_secret_hash = ?1 WHERE id = ?2",
+                params![hash, id],
+            )?;
+            Ok(n > 0)
         })
         .await
     }

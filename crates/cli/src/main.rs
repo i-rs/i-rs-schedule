@@ -30,6 +30,13 @@ enum Command {
     #[command(subcommand)]
     Exec(ExecCmd),
 
+    /// 任务 Webhook 触发器
+    Hook {
+        id: String,
+        /// enable(开启/轮换,打印 URL 一次)| disable
+        action: String,
+    },
+
     #[command(subcommand)]
     Cron(CronCmd),
 
@@ -45,6 +52,25 @@ enum Command {
         #[arg(default_value = "status")]
         action: String,
     },
+
+    #[command(subcommand)]
+    Var(VarCmd),
+}
+
+#[derive(Subcommand)]
+enum VarCmd {
+    /// 列出全部变量(secret 不显示值)
+    List,
+    /// 设置/更新一个变量
+    Set {
+        key: String,
+        value: String,
+        /// 标记为密钥(API 永不回显)
+        #[arg(long, default_value_t = false)]
+        secret: bool,
+    },
+    /// 删除一个变量
+    Delete { key: String },
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -112,6 +138,10 @@ struct AddArgs {
     /// 标签(逗号分隔)
     #[arg(long, value_delimiter = ',')]
     tags: Vec<String>,
+
+    /// 漏跑告警:到期后宽限期内无执行尝试则推送
+    #[arg(long, default_value_t = false)]
+    missed_alert: bool,
 
     #[arg(long, default_value = "")]
     trigger_on_success: Vec<String>,
@@ -184,6 +214,9 @@ struct UpdateArgs {
 
     #[arg(long, value_delimiter = ',')]
     tags: Option<Vec<String>>,
+
+    #[arg(long)]
+    missed_alert: Option<bool>,
 
     #[arg(long, value_delimiter = ',')]
     trigger_on_success: Vec<String>,
@@ -295,6 +328,8 @@ struct CreateTaskBody {
     trigger_task_ids: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tags: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    missed_alert: Option<bool>,
     trigger_on: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     notify_type: Option<String>,
@@ -395,6 +430,7 @@ async fn main() -> Result<()> {
                     } else {
                         Some(args.tags)
                     },
+                    missed_alert: Some(args.missed_alert),
                     trigger_on: Some(args.trigger_on),
                     enabled: args.enabled,
                     notify_type: Some(args.notify_type),
@@ -433,6 +469,7 @@ async fn main() -> Result<()> {
                     "max_concurrent": cur["max_concurrent"],
                     "trigger_task_ids": cur["trigger_task_ids"],
                     "tags": cur["tags"],
+                    "missed_alert": cur["missed_alert"],
                     "enabled": cur["enabled"],
                     "notify_type": cur["notify_type"],
                     "notify_url": cur["notify_url"],
@@ -506,6 +543,9 @@ async fn main() -> Result<()> {
                 }
                 if let Some(v) = args.tags {
                     payload["tags"] = serde_json::Value::from(v);
+                }
+                if let Some(v) = args.missed_alert {
+                    payload["missed_alert"] = serde_json::Value::from(v);
                 }
                 if !args.trigger_on_success.is_empty() {
                     payload["trigger_task_ids"] = serde_json::json!(args.trigger_on_success);
@@ -698,6 +738,46 @@ async fn main() -> Result<()> {
             }
             other => {
                 anyhow::bail!("unknown maintenance action: {other} (use status | on | off)");
+            }
+        },
+        Command::Hook { id, action } => match action.as_str() {
+            "enable" => {
+                let resp = client
+                    .post(format!("{base}/api/tasks/{id}/hook"))
+                    .send()
+                    .await?;
+                print_response(resp).await?;
+            }
+            "disable" => {
+                let resp = client
+                    .delete(format!("{base}/api/tasks/{id}/hook"))
+                    .send()
+                    .await?;
+                print_response(resp).await?;
+            }
+            other => {
+                anyhow::bail!("unknown hook action: {other} (use enable | disable)");
+            }
+        },
+        Command::Var(cmd) => match cmd {
+            VarCmd::List => {
+                let resp = client.get(format!("{base}/api/vars")).send().await?;
+                print_response(resp).await?;
+            }
+            VarCmd::Set { key, value, secret } => {
+                let resp = client
+                    .post(format!("{base}/api/vars"))
+                    .json(&serde_json::json!({ "key": key, "value": value, "is_secret": secret }))
+                    .send()
+                    .await?;
+                print_response(resp).await?;
+            }
+            VarCmd::Delete { key } => {
+                let resp = client
+                    .delete(format!("{base}/api/vars/{key}"))
+                    .send()
+                    .await?;
+                print_response(resp).await?;
             }
         },
         Command::Exec(cmd) => match cmd {

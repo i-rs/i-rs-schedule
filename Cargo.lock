@@ -751,7 +751,7 @@ dependencies = [
 
 [[package]]
 name = "i-rs-schedule"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -760,6 +760,7 @@ dependencies = [
  "cron",
  "desirable",
  "futures-util",
+ "http-body-util",
  "r2d2",
  "r2d2_sqlite",
  "rand 0.9.5",
@@ -778,7 +779,7 @@ dependencies = [
 
 [[package]]
 name = "i-rs-schedule-cli"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "clap",

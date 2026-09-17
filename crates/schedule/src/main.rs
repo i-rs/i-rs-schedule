@@ -8,6 +8,7 @@ mod notify;
 mod output;
 mod schedule;
 mod scheduler;
+mod watchdog;
 
 use db::Db;
 use executor::Executor;
@@ -92,6 +93,13 @@ async fn main() -> anyhow::Result<()> {
     ));
     let scheduler_db = db.clone();
     let api_executor = executor.clone();
+
+    // 漏跑检测:每分钟扫描开启 missed_alert 的任务
+    let wd_db = db.clone();
+    let wd_exec = executor.as_ref().clone();
+    tokio::spawn(async move {
+        watchdog::run(wd_db, wd_exec).await;
+    });
 
     // scheduler 在后台跑,处理到期任务与控制命令。
     let scheduler_handle = tokio::spawn(async move {
