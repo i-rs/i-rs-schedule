@@ -12,6 +12,7 @@ pub struct FileConfig {
     pub admin_password: Option<String>,
     pub notify_type: Option<String>,
     pub notify_url: Option<String>,
+    pub max_output_kb: Option<usize>,
 }
 
 impl FileConfig {
@@ -42,6 +43,8 @@ pub struct Config {
     pub admin_password: Option<String>,
     pub notify_type: Option<String>,
     pub notify_url: Option<String>,
+    /// 任务输出持久化上限(KB,0 = 不限)
+    pub max_output_kb: usize,
 }
 
 impl Config {
@@ -67,6 +70,10 @@ impl Config {
             .or(file.notify_type)
             .filter(|v| v != "none");
         let notify_url = env("NOTIFY_URL").or(file.notify_url);
+        let max_output_kb = env("MAX_OUTPUT_KB")
+            .and_then(|v| v.parse().ok())
+            .or(file.max_output_kb)
+            .unwrap_or(64);
 
         Self {
             db_path,
@@ -77,6 +84,7 @@ impl Config {
             admin_password,
             notify_type,
             notify_url,
+            max_output_kb,
         }
     }
 

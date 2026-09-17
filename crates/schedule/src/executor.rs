@@ -29,6 +29,8 @@ pub struct Executor {
     notifier: Notifier,
     /// 全局通知渠道(任务未配置时的回落):(notify_type, notify_url)
     global_notify: Option<(String, String)>,
+    /// 输出持久化上限(KB,0 = 不限)
+    max_output_kb: usize,
 }
 
 impl Executor {
@@ -37,7 +39,7 @@ impl Executor {
         &self.notifier
     }
 
-    pub fn new(global_notify: Option<(String, String)>) -> Self {
+    pub fn new(global_notify: Option<(String, String)>, max_output_kb: usize) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
@@ -46,6 +48,7 @@ impl Executor {
             client,
             notifier: Notifier::new(),
             global_notify,
+            max_output_kb,
         }
     }
 
@@ -72,7 +75,12 @@ impl Executor {
                         .replace("{{trigger.status}}", &ctx.status),
                     None => cmd.clone(),
                 };
-                Self::execute_shell(&cmd, Duration::from_secs(task.timeout_secs)).await
+                Self::execute_shell(
+                    &cmd,
+                    Duration::from_secs(task.timeout_secs),
+                    self.max_output_kb,
+                )
+                .await
             }
         }
     }
@@ -312,14 +320,18 @@ impl Executor {
             Ok(resp) => {
                 let http_status = resp.status().as_u16() as i64;
                 let is_success = resp.status().is_success();
-                let output = resp.text().await.unwrap_or_default();
+                let mut out = crate::output::BoundedOutput::new(self.max_output_kb);
+                match resp.bytes().await {
+                    Ok(bytes) => out.push(&bytes),
+                    Err(e) => out.push(e.to_string().as_bytes()),
+                }
                 ExecutionResult {
                     status: if is_success {
                         "success".to_string()
                     } else {
                         "failure".to_string()
                     },
-                    output,
+                    output: out.snapshot(),
                     http_status: Some(http_status),
                 }
             }
@@ -331,7 +343,7 @@ impl Executor {
         }
     }
 
-    async fn execute_shell(cmd: &str, timeout: Duration) -> ExecutionResult {
+    async fn execute_shell(cmd: &str, timeout: Duration, max_output_kb: usize) -> ExecutionResult {
         // 与 HTTP 一致按任务配置超时,防止无限运行占住执行槽。
         match tokio::time::timeout(
             timeout,
@@ -348,14 +360,13 @@ impl Executor {
                 } else {
                     "failure"
                 };
-                let output = if out.status.success() {
-                    String::from_utf8_lossy(&out.stdout).to_string()
-                } else {
-                    String::from_utf8_lossy(&out.stderr).to_string()
-                };
+                // stdout + stderr 合并持久化(实时视图同源),超限头尾截断。
+                let mut buf = crate::output::BoundedOutput::new(max_output_kb);
+                buf.push(&out.stdout);
+                buf.push(&out.stderr);
                 ExecutionResult {
                     status: status.to_string(),
-                    output,
+                    output: buf.snapshot(),
                     http_status: None,
                 }
             }
