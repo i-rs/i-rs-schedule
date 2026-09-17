@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.10.0 「事件」(2026-09-18)
+
+不止定时:外部世界也能触发任务,沉默故障也有人知道。
+
+### 新增
+
+- **Webhook 触发器**:`POST /api/tasks/:id/hook` 开启/轮换(secret 明文仅返回一次,sha256 入库)、`DELETE` 关闭;触发端点 `POST /api/hooks/:task_id/:secret` 命中即后台执行(secret 即凭据,豁免 Bearer 认证;常数时间比较);支持 `{{event.body}}` / `{{event.query.x}}` 插值;复用并发互斥/重试/通知/审计管线。任务抽屉管理(开启→URL 复制一次→轮换/关闭);CLI `task hook <id> enable|disable`
+- **变量与密钥**:全局变量 `variables` 表;shell cmd 与 HTTP url/body/header 值支持 `{{var.key}}` 插值(执行时加载);`GET/POST/DELETE /api/vars`;is_secret 的 value 永不回传前端、导出不含变量;设置对话框 Variables 标签页;CLI `var list|set|delete`
+- **漏跑检测(deadman)**:任务 `missed_alert` 开关——期望时间(cron 上一触发点)过后 5 分钟宽限期内无任何执行尝试 → 按任务通知渠道推送 `task_missed` 告警;同一期望时间只告警一次;每 60s 扫描,查询失败宁可漏报不误报。表单"漏跑告警"复选框;CLI `--missed-alert`
+
+### 变更
+
+- `tasks` 表新增 `hook_secret_hash`、`missed_alert` 列(幂等迁移);新增 `variables` 表
+- 范围裁剪:任务级变量不做(与直接写值等价的假抽象);`{{event.header.x}}` 暂不支持
+
 ## v0.9.0 「秩序」(2026-09-17)
 
 任务多了、跑久了,不失控:并发互斥、标签组织、维护模式、自动备份。
