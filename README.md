@@ -121,6 +121,7 @@ docker compose up -d --build
 | `SCHEDULE_SERVER` | `http://localhost:3000` | CLI server address |
 | `SCHEDULE_TOKEN` | *(unset)* | API token; when set, all requests require `Authorization: Bearer <token>` |
 | `RETENTION_DAYS` | `30` | Execution history retention; `0` keeps records forever |
+| `MAX_OUTPUT_KB` | `64` | Persisted output cap per execution (head+tail kept with a truncation marker); `0` unlimited |
 | `RUST_LOG` | `info` | Log level (e.g. `i_rs_schedule=debug`) |
 
 ## Commands
