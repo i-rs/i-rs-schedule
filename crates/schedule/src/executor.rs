@@ -1,5 +1,6 @@
 use crate::db::{Db, Task, TaskExecution, TaskType};
 use crate::notify::Notifier;
+use std::collections::HashMap;
 use std::time::Duration;
 
 /// 链式触发的上下文:触发方(上游)的最终输出与状态。
@@ -35,6 +36,10 @@ pub struct Executor {
     live: crate::live::LiveRegistry,
     /// 全局变更事件(前端事件长轮询用)
     events: crate::live::Events,
+    /// 任务级在途执行计数:max_concurrent 互斥用
+    in_flight: std::sync::Arc<std::sync::Mutex<HashMap<String, usize>>>,
+    /// 全局并发兜底:所有执行共享的信号量(超限等待)
+    global_permits: std::sync::Arc<tokio::sync::Semaphore>,
 }
 
 impl Executor {
@@ -43,10 +48,11 @@ impl Executor {
         &self.notifier
     }
 
-    pub fn new(
+    pub fn with_global_concurrency(
         global_notify: Option<(String, String)>,
         max_output_kb: usize,
         events: crate::live::Events,
+        global_max_concurrent: usize,
     ) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
@@ -59,6 +65,8 @@ impl Executor {
             max_output_kb,
             live: crate::live::LiveRegistry::default(),
             events,
+            in_flight: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
+            global_permits: std::sync::Arc::new(tokio::sync::Semaphore::new(global_max_concurrent)),
         }
     }
 
@@ -123,6 +131,78 @@ impl Executor {
     }
 
     async fn execute_and_record_depth_impl(
+        &self,
+        db: &Db,
+        task: &Task,
+        depth: u32,
+        trigger: Option<TriggerContext>,
+    ) -> TaskExecution {
+        // 任务级并发互斥:达到 max_concurrent 即跳过并落库(重试退避期间占住槽位)。
+        // max_concurrent = 0 表示不限并行。
+        if task.max_concurrent > 0 && !self.acquire_slot(&task.id, task.max_concurrent) {
+            return self
+                .record_skipped(
+                    db,
+                    task,
+                    "overlaps with a previous run (max_concurrent reached)",
+                )
+                .await;
+        }
+        // 全局并发兜底:超限等待(信号量 guard 在作用域结束时释放)
+        let _permit = self.global_permits.clone().acquire_owned().await;
+
+        let result = self.run_with_retries(db, task, depth, trigger).await;
+
+        if task.max_concurrent > 0 {
+            self.release_slot(&task.id);
+        }
+        result
+    }
+
+    /// 任务级在途计数 +1;已达上限返回 false。
+    fn acquire_slot(&self, task_id: &str, max: i64) -> bool {
+        let mut map = self.in_flight.lock().unwrap();
+        let cur = map.entry(task_id.to_string()).or_insert(0);
+        if *cur >= max as usize {
+            false
+        } else {
+            *cur += 1;
+            true
+        }
+    }
+
+    fn release_slot(&self, task_id: &str) {
+        let mut map = self.in_flight.lock().unwrap();
+        if let Some(c) = map.get_mut(task_id) {
+            *c -= 1;
+            if *c == 0 {
+                map.remove(task_id);
+            }
+        }
+    }
+
+    /// 落库一条 skipped 记录(并发跳过等场景),并推送事件刷新。
+    async fn record_skipped(&self, db: &Db, task: &Task, reason: &str) -> TaskExecution {
+        let exec = TaskExecution {
+            id: uuid::Uuid::new_v4().to_string(),
+            task_id: task.id.clone(),
+            attempt: 0,
+            status: "skipped".to_string(),
+            output: Some(reason.to_string()),
+            http_status: None,
+            started_at: crate::db::now_iso(),
+            finished_at: Some(crate::db::now_iso()),
+        };
+        if let Err(e) = db.create_execution(&exec).await {
+            tracing::warn!(error = %e, task_id = %task.id, "record skipped execution failed");
+        } else {
+            self.events.bump();
+        }
+        tracing::info!(task_id = %task.id, reason = %reason, "execution skipped");
+        exec
+    }
+
+    async fn run_with_retries(
         &self,
         db: &Db,
         task: &Task,
@@ -511,5 +591,70 @@ mod tests {
         assert_eq!(result.status, "failure");
         assert!(result.output.contains("out"));
         assert!(result.output.contains("err"));
+    }
+}
+
+#[cfg(test)]
+mod concurrency_tests {
+    use super::*;
+    use crate::db::ScheduleConfig;
+
+    fn temp_db() -> (Db, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("irs-exec-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::new(dir.join("t.db").to_str().unwrap()).unwrap();
+        (db, dir)
+    }
+
+    fn sleep_task(max_concurrent: i64) -> Task {
+        let mut task = Task::new(
+            "t".into(),
+            TaskType::Shell {
+                cmd: "sleep 0.4".into(),
+            },
+            ScheduleConfig::Once { delay_secs: 0 },
+        );
+        task.timeout_secs = 10;
+        task.max_concurrent = max_concurrent;
+        task
+    }
+
+    #[tokio::test]
+    async fn overlapping_runs_skip_when_limit_reached() {
+        let (db, dir) = temp_db();
+        let ex = Executor::with_global_concurrency(None, 64, crate::live::Events::new(), 32);
+        let task = sleep_task(1);
+        // 先入库:task_executions 对 tasks 有外键约束
+        db.create_task(&task).await.unwrap();
+        let task2 = task.clone();
+        let (a, b) = tokio::join!(
+            ex.execute_and_record(&db, &task),
+            ex.execute_and_record(&db, &task2),
+        );
+        let statuses = [a.status, b.status];
+        assert!(
+            statuses.contains(&"success".to_string()) && statuses.contains(&"skipped".to_string()),
+            "expect one success + one skipped, got {statuses:?}"
+        );
+        // 槽位已释放:再次执行应正常成功
+        let c = ex.execute_and_record(&db, &task).await;
+        assert_eq!(c.status, "success");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn zero_max_concurrent_allows_parallel() {
+        let (db, dir) = temp_db();
+        let ex = Executor::with_global_concurrency(None, 64, crate::live::Events::new(), 32);
+        let task = sleep_task(0);
+        db.create_task(&task).await.unwrap();
+        let task2 = task.clone();
+        let (a, b) = tokio::join!(
+            ex.execute_and_record(&db, &task),
+            ex.execute_and_record(&db, &task2),
+        );
+        assert_eq!(a.status, "success");
+        assert_eq!(b.status, "success");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

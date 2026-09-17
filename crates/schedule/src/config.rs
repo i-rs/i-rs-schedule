@@ -13,6 +13,7 @@ pub struct FileConfig {
     pub notify_type: Option<String>,
     pub notify_url: Option<String>,
     pub max_output_kb: Option<usize>,
+    pub global_max_concurrent: Option<usize>,
 }
 
 impl FileConfig {
@@ -45,6 +46,8 @@ pub struct Config {
     pub notify_url: Option<String>,
     /// 任务输出持久化上限(KB,0 = 不限)
     pub max_output_kb: usize,
+    /// 全局并发执行上限(超限等待)
+    pub global_max_concurrent: usize,
 }
 
 impl Config {
@@ -74,6 +77,10 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .or(file.max_output_kb)
             .unwrap_or(64);
+        let global_max_concurrent = env("GLOBAL_MAX_CONCURRENCY")
+            .and_then(|v| v.parse().ok())
+            .or(file.global_max_concurrent)
+            .unwrap_or(32);
 
         Self {
             db_path,
@@ -85,6 +92,7 @@ impl Config {
             notify_type,
             notify_url,
             max_output_kb,
+            global_max_concurrent,
         }
     }
 

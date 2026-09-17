@@ -56,10 +56,11 @@ async fn main() -> anyhow::Result<()> {
         (Some(t), Some(u)) if !u.is_empty() => Some((t, u)),
         _ => None,
     };
-    let executor = Arc::new(Executor::new(
+    let executor = Arc::new(Executor::with_global_concurrency(
         global_notify,
         config.max_output_kb,
         live::Events::new(),
+        config.global_max_concurrent,
     ));
     let scheduler_db = db.clone();
     let api_executor = executor.clone();

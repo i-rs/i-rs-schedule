@@ -98,6 +98,10 @@ struct AddArgs {
     #[arg(long, default_value_t = 0)]
     max_retries: i64,
 
+    /// 并发上限(达到即跳过;0 = 不限并行)
+    #[arg(long, default_value_t = 1)]
+    max_concurrent: i64,
+
     #[arg(long, default_value = "")]
     trigger_on_success: Vec<String>,
 
@@ -163,6 +167,9 @@ struct UpdateArgs {
 
     #[arg(long)]
     max_retries: Option<i64>,
+
+    #[arg(long)]
+    max_concurrent: Option<i64>,
 
     #[arg(long, value_delimiter = ',')]
     trigger_on_success: Vec<String>,
@@ -269,6 +276,8 @@ struct CreateTaskBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_retries: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    max_concurrent: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     trigger_task_ids: Option<Vec<String>>,
     trigger_on: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -358,6 +367,7 @@ async fn main() -> Result<()> {
                     timezone: Some(args.timezone),
                     timeout_secs: Some(args.timeout_secs),
                     max_retries: Some(args.max_retries),
+                    max_concurrent: Some(args.max_concurrent),
                     trigger_task_ids: Some(
                         args.trigger_on_success
                             .into_iter()
@@ -399,6 +409,7 @@ async fn main() -> Result<()> {
                     "timezone": cur["timezone"],
                     "timeout_secs": cur["timeout_secs"],
                     "max_retries": cur["max_retries"],
+                    "max_concurrent": cur["max_concurrent"],
                     "enabled": cur["enabled"],
                     "notify_type": cur["notify_type"],
                     "notify_url": cur["notify_url"],
@@ -466,6 +477,9 @@ async fn main() -> Result<()> {
                 }
                 if let Some(v) = args.max_retries {
                     payload["max_retries"] = serde_json::Value::from(v);
+                }
+                if let Some(v) = args.max_concurrent {
+                    payload["max_concurrent"] = serde_json::Value::from(v);
                 }
                 if !args.trigger_on_success.is_empty() {
                     payload["trigger_task_ids"] = serde_json::json!(args.trigger_on_success);

@@ -7,6 +7,7 @@ export interface Task {
   timezone: string;
   timeout_secs: number;
   max_retries: number;
+  max_concurrent: number;
   trigger_task_ids: string[];
   trigger_on: string;
   next_run_at: string | null;
@@ -103,6 +104,7 @@ export interface CreateTaskPayload {
   timezone?: string;
   timeout_secs?: number;
   max_retries?: number;
+  max_concurrent?: number;
   trigger_task_ids?: string[];
   trigger_on?: string;
   notify_type?: string;

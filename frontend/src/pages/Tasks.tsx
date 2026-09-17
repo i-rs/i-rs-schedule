@@ -33,6 +33,7 @@ interface TaskForm {
   timezone: string;
   timeout_secs: string;
   max_retries: string;
+  max_concurrent: string;
   trigger_task_ids: string[];
   trigger_on: "success" | "failure" | "always";
   notify_type: "none" | "webhook" | "feishu" | "dingtalk";
@@ -52,6 +53,7 @@ const emptyForm: TaskForm = {
   timezone: "UTC",
   timeout_secs: "30",
   max_retries: "0",
+  max_concurrent: "1",
   trigger_task_ids: [],
   trigger_on: "success",
   notify_type: "none",
@@ -133,6 +135,7 @@ export default function Tasks() {
       timezone: form.timezone,
       timeout_secs: parseInt(form.timeout_secs) || 30,
       max_retries: parseInt(form.max_retries) || 0,
+      max_concurrent: parseInt(form.max_concurrent) || 0,
       trigger_task_ids: form.trigger_task_ids,
       trigger_on: form.trigger_on,
       notify_type: form.notify_type,
@@ -174,6 +177,7 @@ export default function Tasks() {
       timezone: t.timezone || "UTC",
       timeout_secs: (t.timeout_secs ?? 30).toString(),
       max_retries: (t.max_retries ?? 0).toString(),
+      max_concurrent: (t.max_concurrent ?? 1).toString(),
       trigger_task_ids: t.trigger_task_ids ?? [],
       trigger_on: (t.trigger_on as TaskForm["trigger_on"]) || "success",
       notify_type: (t.notify_type as TaskForm["notify_type"]) || "none",
@@ -214,6 +218,7 @@ export default function Tasks() {
       timezone: src.timezone,
       timeout_secs: src.timeout_secs,
       max_retries: src.max_retries,
+      max_concurrent: src.max_concurrent,
       notify_type: src.notify_type,
       ...(src.notify_type !== "none" ? { notify_url: src.notify_url } : {}),
     };
@@ -498,6 +503,15 @@ export default function Tasks() {
                           type="number"
                           value={form.max_retries}
                           onChange={(e) => setForm({ ...form, max_retries: e.target.value })}
+                          className="w-24 h-7 text-xs"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Label className="text-xs text-muted-foreground" title={tr("0 = unlimited; when the limit is reached, overlapping runs are skipped")}>{tr("Max concurrent")}</Label>
+                        <Input
+                          type="number"
+                          value={form.max_concurrent}
+                          onChange={(e) => setForm({ ...form, max_concurrent: e.target.value })}
                           className="w-24 h-7 text-xs"
                         />
                       </div>

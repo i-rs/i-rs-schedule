@@ -102,6 +102,8 @@ const zh: Record<string, string> = {
   "Show output": "展开输出",
   "Hide output": "收起输出",
   "Live": "实时",
+  "Skipped": "已跳过",
+  "Max concurrent": "并发上限",
   "Finished": "已结束",
   "Waiting for response…": "等待响应…",
   "Load More": "加载更多",

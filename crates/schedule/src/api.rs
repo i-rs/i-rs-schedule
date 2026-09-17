@@ -63,6 +63,7 @@ struct CreateTaskRequest {
     timezone: Option<String>,
     timeout_secs: Option<u64>,
     max_retries: Option<i64>,
+    max_concurrent: Option<i64>,
     trigger_task_ids: Option<Vec<String>>,
     trigger_on: Option<String>,
     notify_type: Option<String>,
@@ -113,6 +114,10 @@ fn build_task_with_hint(body: CreateTaskRequest, id_hint: String) -> Result<Task
     if !(0..=10).contains(&max_retries) {
         return Err("max_retries must be between 0 and 10".into());
     }
+    let max_concurrent = body.max_concurrent.unwrap_or(1);
+    if !(0..=64).contains(&max_concurrent) {
+        return Err("max_concurrent must be between 0 and 64 (0 = unlimited)".into());
+    }
     let mut trigger_task_ids = body.trigger_task_ids.unwrap_or_default();
     trigger_task_ids.retain(|id| !id.trim().is_empty());
     if trigger_task_ids.contains(&id_hint) {
@@ -146,6 +151,7 @@ fn build_task_with_hint(body: CreateTaskRequest, id_hint: String) -> Result<Task
     task.timezone = timezone;
     task.timeout_secs = timeout_secs;
     task.max_retries = max_retries;
+    task.max_concurrent = max_concurrent;
     task.trigger_task_ids = trigger_task_ids;
     task.trigger_on = trigger_on;
     Ok(task)

@@ -13,6 +13,10 @@ pub(crate) fn now_iso() -> String {
     chrono::Utc::now().format(TIMESTAMP_FMT).to_string()
 }
 
+fn default_max_concurrent() -> i64 {
+    1
+}
+
 /// 解析 ISO-8601 时间戳;兼容毫秒与任意精度小数秒两种写法。
 pub(crate) fn parse_iso(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     chrono::NaiveDateTime::parse_from_str(s, TIMESTAMP_FMT)
@@ -31,6 +35,9 @@ pub struct Task {
     pub timezone: String,
     pub timeout_secs: u64,
     pub max_retries: i64,
+    /// 并发互斥:同任务在途执行达到上限即跳过;0 = 不限并行
+    #[serde(default = "default_max_concurrent")]
+    pub max_concurrent: i64,
     #[serde(default)]
     pub trigger_task_ids: Vec<String>,
     pub trigger_on: String,
@@ -80,6 +87,7 @@ impl Task {
             timezone: "UTC".to_string(),
             timeout_secs: 30,
             max_retries: 0,
+            max_concurrent: 1,
             trigger_task_ids: Vec::new(),
             trigger_on: "success".into(),
             notify_type: "none".to_string(),
@@ -139,6 +147,7 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     let timezone: String = row.get("timezone")?;
     let timeout_secs: u64 = row.get::<_, i64>("timeout_secs")? as u64;
     let max_retries: i64 = row.get("max_retries")?;
+    let max_concurrent: i64 = row.get("max_concurrent")?;
     let trigger_ids_raw: String = row.get("trigger_task_ids")?;
     let trigger_task_ids: Vec<String> = serde_json::from_str(&trigger_ids_raw).unwrap_or_default();
     let trigger_on: String = row.get("trigger_on")?;
@@ -175,6 +184,7 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         timezone,
         timeout_secs,
         max_retries,
+        max_concurrent,
         trigger_task_ids,
         trigger_on,
         notify_type,
@@ -235,6 +245,7 @@ impl Db {
                 timezone    TEXT NOT NULL DEFAULT 'UTC',
                 timeout_secs INTEGER NOT NULL DEFAULT 30,
                 max_retries INTEGER NOT NULL DEFAULT 0,
+                max_concurrent INTEGER NOT NULL DEFAULT 1,
                 trigger_task_ids TEXT NOT NULL DEFAULT '[]', -- 成功后触发的下游任务(id 数组)
                 trigger_on   TEXT NOT NULL DEFAULT 'success',
                 notify_type TEXT NOT NULL DEFAULT 'none',
@@ -317,6 +328,13 @@ impl Db {
                 [],
             )?;
             tracing::info!("migrated tasks table: added max_retries");
+        }
+        if !existing.iter().any(|c| c == "max_concurrent") {
+            conn.execute(
+                "ALTER TABLE tasks ADD COLUMN max_concurrent INTEGER NOT NULL DEFAULT 1",
+                [],
+            )?;
+            tracing::info!("migrated tasks table: added max_concurrent");
         }
         if !existing.iter().any(|c| c == "trigger_task_ids") {
             conn.execute(
@@ -427,8 +445,9 @@ impl Db {
             conn.execute(
                 "INSERT INTO tasks (id, name, task_type, enabled, schedule_type, cron_expr, delay_secs,
                  http_method, http_url, http_headers, http_body, shell_cmd, timezone, timeout_secs,
-                 max_retries, trigger_task_ids, trigger_on, notify_type, notify_url, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+                 max_retries, max_concurrent, trigger_task_ids, trigger_on, notify_type, notify_url,
+                 created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
                 params![
                     task.id,
                     task.name,
@@ -445,6 +464,7 @@ impl Db {
                     task.timezone,
                     task.timeout_secs as i64,
                     task.max_retries,
+                    task.max_concurrent,
                     serde_json::to_string(&task.trigger_task_ids).unwrap(),
                     task.trigger_on,
                     task.notify_type,
@@ -528,8 +548,9 @@ impl Db {
             conn.execute(
                 "UPDATE tasks SET name=?1, task_type=?2, enabled=?3, schedule_type=?4, cron_expr=?5,
                  delay_secs=?6, http_method=?7, http_url=?8, http_headers=?9, http_body=?10,
-                 shell_cmd=?11, timezone=?12, timeout_secs=?13, max_retries=?14, trigger_task_ids=?15,
-                 trigger_on=?16, notify_type=?17, notify_url=?18, updated_at=?19 WHERE id=?20",
+                 shell_cmd=?11, timezone=?12, timeout_secs=?13, max_retries=?14, max_concurrent=?15,
+                 trigger_task_ids=?16, trigger_on=?17, notify_type=?18, notify_url=?19,
+                 updated_at=?20 WHERE id=?21",
                 params![
                     task.name,
                     task_type_str,
@@ -545,6 +566,7 @@ impl Db {
                     task.timezone,
                     task.timeout_secs as i64,
                     task.max_retries,
+                    task.max_concurrent,
                     serde_json::to_string(&task.trigger_task_ids).unwrap(),
                     task.trigger_on,
                     task.notify_type,
