@@ -110,6 +110,8 @@ const zh: Record<string, string> = {
   "Value": "值",
   "Use {{var.key}} in shell commands and HTTP fields.": "在 shell 命令与 HTTP 字段中使用 {{var.key}} 插值。",
   "Webhook trigger": "Webhook 触发",
+  "Missed-run alert": "漏跑告警",
+  "Alert when a scheduled run never starts (5 min grace)": "计划执行未开始时告警(5 分钟宽限)",
   "Rotate secret": "轮换密钥",
   "Copy this URL now — the secret is shown only once.": "立即复制此 URL——密钥仅显示一次。",
   "POST to this URL to run the task. Use {{event.body}} / {{event.query.x}} in the command.": "POST 此 URL 即可触发任务;命令中可用 {{event.body}} / {{event.query.x}} 插值。",

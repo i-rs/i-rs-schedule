@@ -10,6 +10,7 @@ export interface Task {
   max_concurrent: number;
   trigger_task_ids: string[];
   tags: string[];
+  missed_alert: boolean;
   trigger_on: string;
   next_run_at: string | null;
   notify_type: string;
@@ -136,6 +137,7 @@ export interface CreateTaskPayload {
   max_concurrent?: number;
   trigger_task_ids?: string[];
   tags?: string[];
+  missed_alert?: boolean;
   trigger_on?: string;
   notify_type?: string;
   notify_url?: string;

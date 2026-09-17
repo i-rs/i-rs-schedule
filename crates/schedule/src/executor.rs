@@ -235,6 +235,18 @@ impl Executor {
         result
     }
 
+    /// 通知渠道解析:任务配置优先,回落全局渠道(若已配置)。
+    pub fn resolve_notify_channel(&self, task: &Task) -> (String, String) {
+        if task.notify_type != "none" {
+            (task.notify_type.clone(), task.notify_url.clone())
+        } else {
+            match &self.global_notify {
+                Some((nt, nu)) => (nt.clone(), nu.clone()),
+                None => ("none".into(), String::new()),
+            }
+        }
+    }
+
     /// 任务级在途计数 +1;已达上限返回 false。
     fn acquire_slot(&self, task_id: &str, max: i64) -> bool {
         let mut map = self.in_flight.lock().unwrap();
@@ -309,15 +321,7 @@ impl Executor {
         }
 
         // 通知只看最终结果:失败必推;成功且上一次为失败/中断时推送恢复。
-        // 任务未配置渠道时回落到全局通知(若已配置)。
-        let (notify_type, notify_url) = if task.notify_type != "none" {
-            (task.notify_type.clone(), task.notify_url.clone())
-        } else {
-            match &self.global_notify {
-                Some((nt, nu)) => (nt.clone(), nu.clone()),
-                None => ("none".into(), String::new()),
-            }
-        };
+        let (notify_type, notify_url) = self.resolve_notify_channel(task);
         if notify_type != "none" {
             if final_exec.status == "failure" {
                 self.notifier.send_channel(

@@ -36,6 +36,7 @@ interface TaskForm {
   max_concurrent: string;
   trigger_task_ids: string[];
   tags: string;
+  missed_alert: boolean;
   trigger_on: "success" | "failure" | "always";
   notify_type: "none" | "webhook" | "feishu" | "dingtalk";
   notify_url: string;
@@ -57,6 +58,7 @@ const emptyForm: TaskForm = {
   max_concurrent: "1",
   trigger_task_ids: [],
   tags: "",
+  missed_alert: false,
   trigger_on: "success",
   notify_type: "none",
   notify_url: "",
@@ -152,6 +154,7 @@ export default function Tasks() {
       max_concurrent: parseInt(form.max_concurrent) || 0,
       trigger_task_ids: form.trigger_task_ids,
       tags: form.tags.split(",").map((s) => s.trim()).filter(Boolean),
+      missed_alert: form.missed_alert,
       trigger_on: form.trigger_on,
       notify_type: form.notify_type,
       ...(form.notify_type !== "none" ? { notify_url: form.notify_url } : {}),
@@ -195,6 +198,7 @@ export default function Tasks() {
       max_concurrent: (t.max_concurrent ?? 1).toString(),
       trigger_task_ids: t.trigger_task_ids ?? [],
       tags: (t.tags ?? []).join(", "),
+      missed_alert: t.missed_alert ?? false,
       trigger_on: (t.trigger_on as TaskForm["trigger_on"]) || "success",
       notify_type: (t.notify_type as TaskForm["notify_type"]) || "none",
       notify_url: t.notify_url ?? "",
@@ -236,6 +240,7 @@ export default function Tasks() {
       max_retries: src.max_retries,
       max_concurrent: src.max_concurrent,
       tags: src.tags ?? [],
+      missed_alert: src.missed_alert,
       notify_type: src.notify_type,
       ...(src.notify_type !== "none" ? { notify_url: src.notify_url } : {}),
     };
@@ -786,6 +791,15 @@ export default function Tasks() {
                     <SelectItem value="dingtalk">钉钉</SelectItem>
                   </SelectContent>
                 </Select>
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap cursor-pointer self-center" title={tr("Alert when a scheduled run never starts (5 min grace)")}>
+                  <input
+                    type="checkbox"
+                    checked={form.missed_alert}
+                    onChange={(e) => setForm({ ...form, missed_alert: e.target.checked })}
+                    className="h-3.5 w-3.5 accent-[var(--primary)]"
+                  />
+                  {tr("Missed-run alert")}
+                </label>
                 {form.notify_type !== "none" && (
                   <Input
                     value={form.notify_url}
