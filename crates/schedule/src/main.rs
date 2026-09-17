@@ -39,9 +39,19 @@ async fn main() -> anyhow::Result<()> {
     let tasks = db.list_enabled_tasks().await?;
     tracing::info!("loaded {} enabled tasks from db", tasks.len());
 
+    // 维护模式:重启后从 settings 恢复
+    let maintenance_enabled = matches!(
+        db.get_setting("maintenance").await.unwrap().as_deref(),
+        Some("1")
+    );
+    if maintenance_enabled {
+        tracing::info!("maintenance mode restored: enabled");
+    }
+    let maintenance = scheduler::Maintenance::new(maintenance_enabled);
+
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
 
-    let mut scheduler = Scheduler::new();
+    let mut scheduler = Scheduler::new(maintenance_enabled);
     scheduler.load_tasks(tasks);
 
     // 管理员账号(可选):配置了即启用登录
@@ -78,6 +88,7 @@ async fn main() -> anyhow::Result<()> {
             static_token: config.token.clone(),
             has_admin,
         },
+        maintenance,
     );
 
     tracing::info!("starting server on http://{addr}");

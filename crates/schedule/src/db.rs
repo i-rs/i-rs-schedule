@@ -299,6 +299,11 @@ impl Db {
                 summary TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_task_executions_task_id ON task_executions(task_id);
             CREATE INDEX IF NOT EXISTS idx_task_executions_started_at ON task_executions(started_at);
             ",
@@ -979,6 +984,33 @@ impl Db {
                 .query_map(params![limit], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
+        })
+        .await
+    }
+
+    /// 读取一个设置项(settings 表)。
+    pub async fn get_setting(&self, key: &str) -> anyhow::Result<Option<String>> {
+        let pool = self.pool.clone();
+        let key = key.to_string();
+        spawn_db(pool, move |conn| {
+            let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
+            let mut rows = stmt.query_map(params![key], |r| r.get::<_, String>(0))?;
+            Ok(rows.next().transpose()?)
+        })
+        .await
+    }
+
+    /// 写入一个设置项(幂等 upsert)。
+    pub async fn set_setting(&self, key: &str, value: &str) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let (key, value) = (key.to_string(), value.to_string());
+        spawn_db(pool, move |conn| {
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![key, value],
+            )?;
+            Ok(())
         })
         .await
     }

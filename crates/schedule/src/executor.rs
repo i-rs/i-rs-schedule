@@ -182,7 +182,7 @@ impl Executor {
     }
 
     /// 落库一条 skipped 记录(并发跳过等场景),并推送事件刷新。
-    async fn record_skipped(&self, db: &Db, task: &Task, reason: &str) -> TaskExecution {
+    pub(crate) async fn record_skipped(&self, db: &Db, task: &Task, reason: &str) -> TaskExecution {
         let exec = TaskExecution {
             id: uuid::Uuid::new_v4().to_string(),
             task_id: task.id.clone(),

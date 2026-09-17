@@ -38,6 +38,13 @@ enum Command {
 
     #[command(subcommand)]
     Token(TokenCmd),
+
+    /// 维护模式:暂停/恢复定时调度
+    Maintenance {
+        /// status | on | off
+        #[arg(default_value = "status")]
+        action: String,
+    },
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -674,6 +681,23 @@ async fn main() -> Result<()> {
                     .send()
                     .await?;
                 print_response(resp).await?;
+            }
+        },
+        Command::Maintenance { action } => match action.as_str() {
+            "status" => {
+                let resp = client.get(format!("{base}/api/maintenance")).send().await?;
+                print_response(resp).await?;
+            }
+            "on" | "off" => {
+                let resp = client
+                    .post(format!("{base}/api/maintenance"))
+                    .json(&serde_json::json!({ "enabled": action == "on" }))
+                    .send()
+                    .await?;
+                print_response(resp).await?;
+            }
+            other => {
+                anyhow::bail!("unknown maintenance action: {other} (use status | on | off)");
             }
         },
         Command::Exec(cmd) => match cmd {

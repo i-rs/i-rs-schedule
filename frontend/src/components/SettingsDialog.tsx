@@ -8,6 +8,8 @@ import {
   createApiToken,
   revokeApiToken,
   listAudit,
+  getMaintenance,
+  setMaintenance,
   type ApiTokenInfo,
   type AuditEntry,
 } from "@/api";
@@ -22,11 +24,13 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [newName, setNewName] = useState("");
   const [minted, setMinted] = useState<string | null>(null);
+  const [maintenance, setMaintenanceState] = useState(false);
 
   const load = async () => {
     try {
       setTokens(await listApiTokens());
       setAudit(await listAudit(50));
+      setMaintenanceState((await getMaintenance()).enabled);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
@@ -125,6 +129,39 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   </div>
                 ))
               )}
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">{t("Maintenance mode")}</p>
+                <p className="text-xs text-muted-foreground">
+                  {t("Pause all scheduled runs; manual runs are unaffected.")}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" disabled={maintenance}
+                  onClick={async () => {
+                    try {
+                      await setMaintenance(true);
+                      setMaintenanceState(true);
+                      toast.success(t("Maintenance mode enabled"));
+                    } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); }
+                  }}>
+                  {t("Enable")}
+                </Button>
+                <Button size="sm" variant="outline" disabled={!maintenance}
+                  onClick={async () => {
+                    try {
+                      await setMaintenance(false);
+                      setMaintenanceState(false);
+                      toast.success(t("Maintenance mode disabled"));
+                    } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); }
+                  }}>
+                  {t("Disable")}
+                </Button>
+              </div>
             </div>
           </div>
         </Tabs>

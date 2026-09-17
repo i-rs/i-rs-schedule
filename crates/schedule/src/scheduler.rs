@@ -11,21 +11,45 @@ pub enum ControlCmd {
     Add(Task),
     Remove(String),
     Update(Task),
+    /// 维护模式开关:暂停期间到期任务不执行(cron 跳到下次,once 记 skipped)
+    SetMaintenance(bool),
     Shutdown,
+}
+
+/// 维护模式进程内状态(API / healthz 共享;持久化在 settings 表,重启恢复)。
+#[derive(Clone)]
+pub struct Maintenance(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl Maintenance {
+    pub fn new(enabled: bool) -> Self {
+        Self(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+            enabled,
+        )))
+    }
+
+    pub fn enabled(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn set(&self, on: bool) {
+        self.0.store(on, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 pub struct Scheduler {
     queue: DelayQueue<Task>,
     keys: HashMap<String, delay_queue::Key>,
     join_set: tokio::task::JoinSet<()>,
+    paused: bool,
 }
 
 impl Scheduler {
-    pub fn new() -> Self {
+    pub fn new(paused: bool) -> Self {
         Self {
             queue: DelayQueue::new(),
             keys: HashMap::new(),
             join_set: tokio::task::JoinSet::new(),
+            paused,
         }
     }
 
@@ -91,6 +115,24 @@ impl Scheduler {
                         }
                     }
 
+                    if self.paused {
+                        // 维护模式:到期不执行。cron 已重排到下次;once 错过记 skipped。
+                        if matches!(task.schedule, ScheduleConfig::Once { .. }) {
+                            let exec = executor.clone();
+                            let db2 = db.clone();
+                            let t2 = task.clone();
+                            self.join_set.spawn(async move {
+                                exec.record_skipped(&db2, &t2, "missed during maintenance").await;
+                            });
+                        }
+                        tracing::info!(
+                            task_id = %task.id,
+                            name = %task.name,
+                            "maintenance mode: task due but skipped"
+                        );
+                        continue;
+                    }
+
                     tracing::debug!(task_id = %task.id, name = %task.name, "task due");
 
                     let exec = executor.clone();
@@ -115,6 +157,10 @@ impl Scheduler {
                         ControlCmd::Update(task) => {
                             tracing::debug!(task_id = %task.id, "scheduler update");
                             self.update(task);
+                        }
+                        ControlCmd::SetMaintenance(on) => {
+                            tracing::info!("maintenance mode: {}", if on { "enabled" } else { "disabled" });
+                            self.paused = on;
                         }
                         ControlCmd::Shutdown => {
                             tracing::info!(

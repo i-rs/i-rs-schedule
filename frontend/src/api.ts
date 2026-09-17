@@ -42,6 +42,15 @@ export async function getLiveOutput(id: string, cursor: number, signal?: AbortSi
   return request(`/api/executions/${id}/live?cursor=${cursor}`, { signal });
 }
 
+/** 维护模式:暂停期间 cron 不派发、once 到期记 skipped。 */
+export async function getMaintenance(): Promise<{ enabled: boolean }> {
+  return request("/api/maintenance");
+}
+
+export async function setMaintenance(enabled: boolean): Promise<{ enabled: boolean }> {
+  return request("/api/maintenance", { method: "POST", body: JSON.stringify({ enabled }) });
+}
+
 /** 长轮询全局事件游标:游标前进说明有执行/任务变化。 */
 export async function pollEvents(cursor: number, signal?: AbortSignal): Promise<{ cursor: number }> {
   return request(`/api/events?cursor=${cursor}`, { signal });

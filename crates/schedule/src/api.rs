@@ -259,6 +259,7 @@ pub fn build_router(
     cmd_tx: mpsc::UnboundedSender<ControlCmd>,
     executor: Arc<Executor>,
     auth: AuthSettings,
+    maintenance: crate::scheduler::Maintenance,
 ) -> Router {
     let db = Arc::new(db);
     let cmd_tx = Arc::new(cmd_tx);
@@ -510,6 +511,9 @@ pub fn build_router(
     let ex_live = executor.clone();
     let ex_events = executor.clone();
     let ev_import = executor.events().clone();
+    let ev_maint = executor.events().clone();
+    let maintenance_get = maintenance.clone();
+    let maintenance_post = maintenance.clone();
     let db_run = db.clone();
     let executor_ntest = executor.clone();
     router.post("/api/tasks/:id/run", move |req: Request| {
@@ -634,10 +638,60 @@ pub fn build_router(
         }
     });
 
+    // 维护模式:查询与切换(持久化 + 广播 scheduler + 事件刷新)。
+    {
+        let db_maint = db.clone();
+        let tx_maint = cmd_tx.clone();
+        router.get("/api/maintenance", move |_req: Request| {
+            let maintenance = maintenance_get.clone();
+            async move { ok(serde_json::json!({ "enabled": maintenance.enabled() })) }
+        });
+        router.post("/api/maintenance", move |mut req: Request| {
+            let db = db_maint.clone();
+            let tx = tx_maint.clone();
+            let ev = ev_maint.clone();
+            let maintenance = maintenance_post.clone();
+            async move {
+                #[derive(Deserialize)]
+                struct MaintenanceBody {
+                    enabled: bool,
+                }
+                let body: MaintenanceBody = req
+                    .body()
+                    .await
+                    .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
+                maintenance.set(body.enabled);
+                db.set_setting("maintenance", if body.enabled { "1" } else { "0" })
+                    .await
+                    .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                let _ = tx.send(ControlCmd::SetMaintenance(body.enabled));
+                let _ = db
+                    .audit(
+                        "maintenance",
+                        if body.enabled {
+                            "maintenance mode enabled"
+                        } else {
+                            "maintenance mode disabled"
+                        },
+                    )
+                    .await;
+                ev.bump();
+                ok(serde_json::json!({ "enabled": body.enabled }))
+            }
+        });
+    }
+
     // 健康检查:不认证、不查库,探活专用。
     {
-        router.get("/healthz", move |_req: Request| async move {
-            ok(serde_json::json!({ "status": "ok" }))
+        let maintenance_h = maintenance.clone();
+        router.get("/healthz", move |_req: Request| {
+            let maintenance = maintenance_h.clone();
+            async move {
+                ok(serde_json::json!({
+                    "status": "ok",
+                    "maintenance": maintenance.enabled(),
+                }))
+            }
         });
     }
 
