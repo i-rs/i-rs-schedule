@@ -2,7 +2,9 @@ use crate::db::{Db, ScheduleConfig, Task, TaskType};
 use crate::executor::Executor;
 use crate::scheduler::ControlCmd;
 use desirable::{Middleware, Next, Request, Response, Result as DesirableResult, Router};
+use http_body_util::BodyExt;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -197,6 +199,7 @@ impl Middleware for Auth {
         if req.path().starts_with("/healthz")
             || req.path().starts_with("/metrics")
             || req.path().starts_with("/api/auth/login")
+            || req.path().starts_with("/api/hooks/")
         {
             return next.run(req).await;
         }
@@ -514,6 +517,9 @@ pub fn build_router(
     let ev_import = executor.events().clone();
     let ev_maint = executor.events().clone();
     let ev_vars = executor.events().clone();
+    let ev_hook_set = executor.events().clone();
+    let ev_hook_del = executor.events().clone();
+    let ex_hook = executor.clone();
     let maintenance_get = maintenance.clone();
     let maintenance_post = maintenance.clone();
     let db_run = db.clone();
@@ -765,6 +771,135 @@ pub fn build_router(
             ok(serde_json::json!({ "removed": removed }))
         }
     });
+
+    // Webhook 管理:开启/轮换(明文仅返回一次)与关闭。
+    let db_hook_set = db.clone();
+    let db_hook_get = db.clone();
+    let db_hook_del = db.clone();
+    router.post("/api/tasks/:id/hook", move |req: Request| {
+        let db = db_hook_set.clone();
+        let ev = ev_hook_set.clone();
+        async move {
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
+            if db.get_task(&id).await.ok().flatten().is_none() {
+                return Err(err_msg(404, "not found"));
+            }
+            use rand::RngCore;
+            let mut bytes = [0u8; 16];
+            rand::rng().fill_bytes(&mut bytes);
+            let secret = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+            let hash = crate::db::Db::sha256_hex(&secret);
+            db.set_hook_secret(&id, Some(hash))
+                .await
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+            let _ = db
+                .audit("task.hook", &format!("webhook enabled for task {id}"))
+                .await;
+            ev.bump();
+            ok(serde_json::json!({
+                "secret": secret,
+                "path": format!("/api/hooks/{id}/{secret}"),
+            }))
+        }
+    });
+    router.get("/api/tasks/:id/hook", move |req: Request| {
+        let db = db_hook_get.clone();
+        async move {
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
+            let task = db
+                .get_task(&id)
+                .await
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?
+                .ok_or_else(|| err_msg(404, "not found"))?;
+            ok(serde_json::json!({ "enabled": task.hook_secret_hash.is_some() }))
+        }
+    });
+    router.delete("/api/tasks/:id/hook", move |req: Request| {
+        let db = db_hook_del.clone();
+        let ev = ev_hook_del.clone();
+        async move {
+            let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
+            let exists = db
+                .set_hook_secret(&id, None)
+                .await
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+            if !exists {
+                return Err(err_msg(404, "not found"));
+            }
+            let _ = db
+                .audit("task.hook", &format!("webhook disabled for task {id}"))
+                .await;
+            ev.bump();
+            ok(serde_json::json!({ "disabled": true }))
+        }
+    });
+
+    // Webhook 触发端点:secret 即凭据(Auth 豁免),命中即后台执行。
+    {
+        let db_hook = db.clone();
+        router.post("/api/hooks/:task_id/:secret", move |req: Request| {
+            let db = db_hook.clone();
+            let exec = ex_hook.clone();
+            async move {
+                let task_id: String = req
+                    .param("task_id")
+                    .map_err(|_| err_msg(400, "missing id"))?;
+                let secret: String = req
+                    .param("secret")
+                    .map_err(|_| err_msg(400, "missing secret"))?;
+                let task = db
+                    .get_task(&task_id)
+                    .await
+                    .map_err(|e| err_msg(500, format!("db error: {e}")))?
+                    .ok_or_else(|| err_msg(404, "not found"))?;
+                let Some(stored) = task.hook_secret_hash.clone() else {
+                    return Err(err_msg(404, "not found"));
+                };
+                // 常数时间比较,避免逐字节短路泄漏前缀
+                let provided = crate::db::Db::sha256_hex(&secret);
+                let a = provided.as_bytes();
+                let b = stored.as_bytes();
+                if a.len() != b.len() || a.iter().zip(b).any(|(x, y)| x != y) {
+                    return Err(err_msg(403, "invalid secret"));
+                }
+                // 先取 query,再消费 body
+                let query: HashMap<String, String> = req
+                    .inner
+                    .uri()
+                    .query()
+                    .map(|q| {
+                        q.split('&')
+                            .filter_map(|pair| {
+                                let (k, v) = pair.split_once('=')?;
+                                Some((k.to_string(), v.to_string()))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let bytes = req
+                    .inner
+                    .collect()
+                    .await
+                    .map_err(|e| err_msg(400, format!("read body failed: {e}")))?
+                    .to_bytes();
+                let body = String::from_utf8_lossy(&bytes).to_string();
+                let _ = db
+                    .audit("task.hook", &format!("webhook triggered task {task_id}"))
+                    .await;
+                let db2 = db.clone();
+                tokio::spawn(async move {
+                    let _ = exec
+                        .execute_and_record_event(
+                            &db2,
+                            &task,
+                            crate::executor::EventContext { body, query },
+                        )
+                        .await;
+                });
+                ok(serde_json::json!({ "triggered": true }))
+            }
+        });
+    }
 
     // 健康检查:不认证、不查库,探活专用。
     {

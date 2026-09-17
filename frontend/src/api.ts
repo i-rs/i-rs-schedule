@@ -167,6 +167,23 @@ export async function enableTask(id: string): Promise<void> {
   await request(`/api/tasks/${id}/enable`, { method: "POST" });
 }
 
+export interface HookConfig {
+  enabled: boolean;
+}
+
+/** Webhook 触发:开启/轮换(secret 明文仅返回一次)。 */
+export async function enableHook(id: string): Promise<{ secret: string; path: string }> {
+  return request(`/api/tasks/${id}/hook`, { method: "POST" });
+}
+
+export async function disableHook(id: string): Promise<void> {
+  await request(`/api/tasks/${id}/hook`, { method: "DELETE" });
+}
+
+export async function getHook(id: string): Promise<HookConfig> {
+  return request(`/api/tasks/${id}/hook`);
+}
+
 /** 批量操作:enable | disable | delete */
 export async function batchTasks(ids: string[], action: "enable" | "disable" | "delete"): Promise<{ changed: number }> {
   return request("/api/tasks/batch", { method: "POST", body: JSON.stringify({ ids, action }) });

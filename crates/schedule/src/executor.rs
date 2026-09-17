@@ -182,6 +182,17 @@ impl Executor {
         self.execute_and_record_depth(db, task, 0, None, None).await
     }
 
+    /// Webhook 等事件触发的执行入口(与 cron/manual 同一并发/重试/通知管线)。
+    pub async fn execute_and_record_event(
+        &self,
+        db: &Db,
+        task: &Task,
+        event: EventContext,
+    ) -> TaskExecution {
+        self.execute_and_record_depth(db, task, 0, None, Some(event))
+            .await
+    }
+
     /// depth 用于链式触发的环防护(最大 10 层)。装箱返回以打破递归 future 的 Send 推导。
     pub fn execute_and_record_depth<'a>(
         &'a self,

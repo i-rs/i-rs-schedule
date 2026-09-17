@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 desirable = "1.2"
+http-body-util = "0.1"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["time"] }
 rusqlite = { version = "0.40.1", features = ["bundled"] }

@@ -134,6 +134,7 @@ mod tests {
             max_concurrent: 1,
             trigger_task_ids: Vec::new(),
             tags: Vec::new(),
+            hook_secret_hash: None,
             trigger_on: "success".into(),
             notify_type: "none".into(),
             notify_url: String::new(),

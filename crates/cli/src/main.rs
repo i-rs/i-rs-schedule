@@ -30,6 +30,13 @@ enum Command {
     #[command(subcommand)]
     Exec(ExecCmd),
 
+    /// 任务 Webhook 触发器
+    Hook {
+        id: String,
+        /// enable(开启/轮换,打印 URL 一次)| disable
+        action: String,
+    },
+
     #[command(subcommand)]
     Cron(CronCmd),
 
@@ -717,6 +724,25 @@ async fn main() -> Result<()> {
             }
             other => {
                 anyhow::bail!("unknown maintenance action: {other} (use status | on | off)");
+            }
+        },
+        Command::Hook { id, action } => match action.as_str() {
+            "enable" => {
+                let resp = client
+                    .post(format!("{base}/api/tasks/{id}/hook"))
+                    .send()
+                    .await?;
+                print_response(resp).await?;
+            }
+            "disable" => {
+                let resp = client
+                    .delete(format!("{base}/api/tasks/{id}/hook"))
+                    .send()
+                    .await?;
+                print_response(resp).await?;
+            }
+            other => {
+                anyhow::bail!("unknown hook action: {other} (use enable | disable)");
             }
         },
         Command::Var(cmd) => match cmd {

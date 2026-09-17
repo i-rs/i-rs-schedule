@@ -43,6 +43,9 @@ pub struct Task {
     /// 标签(JSON 数组),组织与批量操作用
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Webhook 触发 secret 的 sha256(仅哈希入库,永不出 API)
+    #[serde(skip_serializing)]
+    pub hook_secret_hash: Option<String>,
     pub trigger_on: String,
     #[serde(rename = "notify_type")]
     pub notify_type: String,
@@ -93,6 +96,7 @@ impl Task {
             max_concurrent: 1,
             trigger_task_ids: Vec::new(),
             tags: Vec::new(),
+            hook_secret_hash: None,
             trigger_on: "success".into(),
             notify_type: "none".to_string(),
             notify_url: String::new(),
@@ -164,6 +168,7 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     let trigger_task_ids: Vec<String> = serde_json::from_str(&trigger_ids_raw).unwrap_or_default();
     let tags_raw: String = row.get("tags")?;
     let tags: Vec<String> = serde_json::from_str(&tags_raw).unwrap_or_default();
+    let hook_secret_hash: Option<String> = row.get("hook_secret_hash")?;
     let trigger_on: String = row.get("trigger_on")?;
     let notify_type: String = row.get("notify_type")?;
     let notify_url: String = row.get("notify_url")?;
@@ -201,6 +206,7 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         max_concurrent,
         trigger_task_ids,
         tags,
+        hook_secret_hash,
         trigger_on,
         notify_type,
         notify_url,
@@ -263,6 +269,7 @@ impl Db {
                 max_concurrent INTEGER NOT NULL DEFAULT 1,
                 trigger_task_ids TEXT NOT NULL DEFAULT '[]', -- 成功后触发的下游任务(id 数组)
                 tags         TEXT NOT NULL DEFAULT '[]', -- 标签(JSON 数组)
+                hook_secret_hash TEXT, -- Webhook 触发 secret 的 sha256(NULL = 未开启)
                 trigger_on   TEXT NOT NULL DEFAULT 'success',
                 notify_type TEXT NOT NULL DEFAULT 'none',
                 notify_url  TEXT NOT NULL DEFAULT '',
@@ -377,6 +384,10 @@ impl Db {
             )?;
             tracing::info!("migrated tasks table: added tags");
         }
+        if !existing.iter().any(|c| c == "hook_secret_hash") {
+            conn.execute("ALTER TABLE tasks ADD COLUMN hook_secret_hash TEXT", [])?;
+            tracing::info!("migrated tasks table: added hook_secret_hash");
+        }
         if !existing.iter().any(|c| c == "trigger_on") {
             conn.execute(
                 "ALTER TABLE tasks ADD COLUMN trigger_on TEXT NOT NULL DEFAULT 'success'",
@@ -479,9 +490,9 @@ impl Db {
             conn.execute(
                 "INSERT INTO tasks (id, name, task_type, enabled, schedule_type, cron_expr, delay_secs,
                  http_method, http_url, http_headers, http_body, shell_cmd, timezone, timeout_secs,
-                 max_retries, max_concurrent, trigger_task_ids, tags, trigger_on, notify_type,
-                 notify_url, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                 max_retries, max_concurrent, trigger_task_ids, tags, hook_secret_hash, trigger_on,
+                 notify_type, notify_url, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
                 params![
                     task.id,
                     task.name,
@@ -501,6 +512,7 @@ impl Db {
                     task.max_concurrent,
                     serde_json::to_string(&task.trigger_task_ids).unwrap(),
                     serde_json::to_string(&task.tags).unwrap(),
+                    task.hook_secret_hash,
                     task.trigger_on,
                     task.notify_type,
                     task.notify_url,
@@ -584,8 +596,8 @@ impl Db {
                 "UPDATE tasks SET name=?1, task_type=?2, enabled=?3, schedule_type=?4, cron_expr=?5,
                  delay_secs=?6, http_method=?7, http_url=?8, http_headers=?9, http_body=?10,
                  shell_cmd=?11, timezone=?12, timeout_secs=?13, max_retries=?14, max_concurrent=?15,
-                 trigger_task_ids=?16, tags=?17, trigger_on=?18, notify_type=?19, notify_url=?20,
-                 updated_at=?21 WHERE id=?22",
+                 trigger_task_ids=?16, tags=?17, hook_secret_hash=?18, trigger_on=?19,
+                 notify_type=?20, notify_url=?21, updated_at=?22 WHERE id=?23",
                 params![
                     task.name,
                     task_type_str,
@@ -604,6 +616,7 @@ impl Db {
                     task.max_concurrent,
                     serde_json::to_string(&task.trigger_task_ids).unwrap(),
                     serde_json::to_string(&task.tags).unwrap(),
+                    task.hook_secret_hash,
                     task.trigger_on,
                     task.notify_type,
                     task.notify_url,
@@ -1067,6 +1080,20 @@ impl Db {
         let key = key.to_string();
         spawn_db(pool, move |conn| {
             let n = conn.execute("DELETE FROM variables WHERE key = ?1", params![key])?;
+            Ok(n > 0)
+        })
+        .await
+    }
+
+    /// 设置/清除任务的 Webhook secret 哈希,返回任务是否存在。
+    pub async fn set_hook_secret(&self, id: &str, hash: Option<String>) -> anyhow::Result<bool> {
+        let pool = self.pool.clone();
+        let id = id.to_string();
+        spawn_db(pool, move |conn| {
+            let n = conn.execute(
+                "UPDATE tasks SET hook_secret_hash = ?1 WHERE id = ?2",
+                params![hash, id],
+            )?;
             Ok(n > 0)
         })
         .await
