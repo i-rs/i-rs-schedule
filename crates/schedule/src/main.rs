@@ -2,6 +2,7 @@ mod api;
 mod config;
 mod db;
 mod executor;
+mod live;
 mod notify;
 mod output;
 mod schedule;
@@ -55,7 +56,11 @@ async fn main() -> anyhow::Result<()> {
         (Some(t), Some(u)) if !u.is_empty() => Some((t, u)),
         _ => None,
     };
-    let executor = Arc::new(Executor::new(global_notify, config.max_output_kb));
+    let executor = Arc::new(Executor::new(
+        global_notify,
+        config.max_output_kb,
+        live::Events::new(),
+    ));
     let scheduler_db = db.clone();
     let api_executor = executor.clone();
 

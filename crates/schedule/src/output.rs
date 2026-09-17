@@ -19,6 +19,10 @@ impl BoundedOutput {
         }
     }
 
+    pub fn total(&self) -> u64 {
+        self.total
+    }
+
     pub fn is_truncated(&self) -> bool {
         self.cap > 0 && self.total > self.cap as u64
     }

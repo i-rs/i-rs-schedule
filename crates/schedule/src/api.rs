@@ -243,9 +243,11 @@ pub fn build_router(
 
     let db_post = db.clone();
     let tx_post = cmd_tx.clone();
+    let ev_post = executor.events().clone();
     router.post("/api/tasks", move |mut req: Request| {
         let db = db_post.clone();
         let tx = tx_post.clone();
+        let ev = ev_post.clone();
         async move {
             let body: CreateTaskRequest = req
                 .body()
@@ -262,6 +264,7 @@ pub fn build_router(
                 .audit("task.create", &format!("created task {}", task.name))
                 .await;
             let _ = tx.send(ControlCmd::Add(task.clone()));
+            ev.bump();
             ok(with_next(task))
         }
     });
@@ -299,9 +302,11 @@ pub fn build_router(
 
     let db_update = db.clone();
     let tx_update = cmd_tx.clone();
+    let ev_update = executor.events().clone();
     router.put("/api/tasks/:id", move |mut req: Request| {
         let db = db_update.clone();
         let tx = tx_update.clone();
+        let ev = ev_update.clone();
         async move {
             let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             let body: CreateTaskRequest = req
@@ -321,15 +326,18 @@ pub fn build_router(
                 .audit("task.update", &format!("updated task {}", task.name))
                 .await;
             let _ = tx.send(ControlCmd::Update(task.clone()));
+            ev.bump();
             ok(with_next(task))
         }
     });
 
     let db_delete = db.clone();
     let tx_delete = cmd_tx.clone();
+    let ev_delete = executor.events().clone();
     router.delete("/api/tasks/:id", move |req: Request| {
         let db = db_delete.clone();
         let tx = tx_delete.clone();
+        let ev = ev_delete.clone();
         async move {
             let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             match db
@@ -340,6 +348,7 @@ pub fn build_router(
                 true => {
                     let _ = db.audit("task.delete", &format!("deleted task {id}")).await;
                     let _ = tx.send(ControlCmd::Remove(id));
+                    ev.bump();
                     ok(serde_json::json!({ "deleted": true }))
                 }
                 false => Err(err_msg(404, "not found")),
@@ -349,9 +358,11 @@ pub fn build_router(
 
     let db_enable = db.clone();
     let tx_enable = cmd_tx.clone();
+    let ev_enable = executor.events().clone();
     router.post("/api/tasks/:id/enable", move |req: Request| {
         let db = db_enable.clone();
         let tx = tx_enable.clone();
+        let ev = ev_enable.clone();
         async move {
             let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             match db
@@ -363,6 +374,7 @@ pub fn build_router(
                     if let Ok(Some(task)) = db.get_task(&id).await {
                         let _ = tx.send(ControlCmd::Add(task));
                     }
+                    ev.bump();
                     ok(serde_json::json!({ "enabled": true }))
                 }
                 false => Err(err_msg(404, "not found")),
@@ -372,9 +384,11 @@ pub fn build_router(
 
     let db_disable = db.clone();
     let tx_disable = cmd_tx.clone();
+    let ev_disable = executor.events().clone();
     router.post("/api/tasks/:id/disable", move |req: Request| {
         let db = db_disable.clone();
         let tx = tx_disable.clone();
+        let ev = ev_disable.clone();
         async move {
             let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
             match db
@@ -384,6 +398,7 @@ pub fn build_router(
             {
                 true => {
                     let _ = tx.send(ControlCmd::Remove(id));
+                    ev.bump();
                     ok(serde_json::json!({ "enabled": false }))
                 }
                 false => Err(err_msg(404, "not found")),
@@ -391,6 +406,9 @@ pub fn build_router(
         }
     });
 
+    let ex_live = executor.clone();
+    let ex_events = executor.clone();
+    let ev_import = executor.events().clone();
     let db_run = db.clone();
     let executor_ntest = executor.clone();
     router.post("/api/tasks/:id/run", move |req: Request| {
@@ -442,6 +460,76 @@ pub fn build_router(
                 Some(exec) => ok(exec),
                 None => Err(err_msg(404, "not found")),
             }
+        }
+    });
+
+    // 实时输出:长轮询。live 条目存在 → 按 cursor 等新快照;
+    // 不存在(已完成 / 重启后)→ 回落 DB,done 即终止前端轮询。
+    {
+        let db_live = db.clone();
+        router.get("/api/executions/:id/live", move |req: Request| {
+            let db = db_live.clone();
+            let ex = ex_live.clone();
+            async move {
+                let id: String = req.param("id").map_err(|_| err_msg(400, "missing id"))?;
+                #[derive(Deserialize)]
+                struct LiveQuery {
+                    cursor: Option<u64>,
+                }
+                let cursor = req
+                    .query::<LiveQuery>()
+                    .ok()
+                    .flatten()
+                    .and_then(|q| q.cursor)
+                    .unwrap_or(0);
+                if let Some(live) = ex.live().get(&id) {
+                    let snap = live
+                        .wait_snapshot(cursor, std::time::Duration::from_secs(25))
+                        .await;
+                    return ok(serde_json::json!({
+                        "version": snap.version,
+                        "output": snap.output,
+                        "total": snap.total,
+                        "done": snap.done,
+                    }));
+                }
+                match db
+                    .get_execution(&id)
+                    .await
+                    .map_err(|e| err_msg(500, format!("db error: {e}")))?
+                {
+                    Some(exec) => ok(serde_json::json!({
+                        "version": 0,
+                        "output": exec.output,
+                        "total": serde_json::Value::Null,
+                        "done": exec.status != "running",
+                        "status": exec.status,
+                    })),
+                    None => Err(err_msg(404, "not found")),
+                }
+            }
+        });
+    }
+
+    // 事件长轮询:任何执行/任务变化推进游标,前端据此触发刷新。
+    router.get("/api/events", move |req: Request| {
+        let ex = ex_events.clone();
+        async move {
+            #[derive(Deserialize)]
+            struct EventsQuery {
+                cursor: Option<u64>,
+            }
+            let cursor = req
+                .query::<EventsQuery>()
+                .ok()
+                .flatten()
+                .and_then(|q| q.cursor)
+                .unwrap_or(0);
+            let next = ex
+                .events()
+                .wait_for(cursor, std::time::Duration::from_secs(25))
+                .await;
+            ok(serde_json::json!({ "cursor": next }))
         }
     });
 
@@ -635,6 +723,7 @@ pub fn build_router(
         let db_import = db.clone();
         router.post("/api/import/tasks", move |mut req: Request| {
             let db = db_import.clone();
+            let ev = ev_import.clone();
             async move {
                 #[derive(Deserialize)]
                 struct ImportBody {
@@ -657,6 +746,9 @@ pub fn build_router(
                         },
                         Err(e) => return Err(err_msg(500, format!("db error: {e}"))),
                     }
+                }
+                if imported > 0 {
+                    ev.bump();
                 }
                 ok(serde_json::json!({ "imported": imported, "skipped": skipped }))
             }

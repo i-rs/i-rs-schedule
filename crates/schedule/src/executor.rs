@@ -31,6 +31,10 @@ pub struct Executor {
     global_notify: Option<(String, String)>,
     /// 输出持久化上限(KB,0 = 不限)
     max_output_kb: usize,
+    /// 运行中 execution 的实时输出注册表(live 端点用)
+    live: crate::live::LiveRegistry,
+    /// 全局变更事件(前端事件长轮询用)
+    events: crate::live::Events,
 }
 
 impl Executor {
@@ -39,7 +43,11 @@ impl Executor {
         &self.notifier
     }
 
-    pub fn new(global_notify: Option<(String, String)>, max_output_kb: usize) -> Self {
+    pub fn new(
+        global_notify: Option<(String, String)>,
+        max_output_kb: usize,
+        events: crate::live::Events,
+    ) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
@@ -49,14 +57,28 @@ impl Executor {
             notifier: Notifier::new(),
             global_notify,
             max_output_kb,
+            live: crate::live::LiveRegistry::default(),
+            events,
         }
     }
 
+    /// 实时输出注册表访问(live 端点用)。
+    pub fn live(&self) -> &crate::live::LiveRegistry {
+        &self.live
+    }
+
+    /// 全局事件访问(events 端点与各变更埋点用)。
+    pub fn events(&self) -> &crate::live::Events {
+        &self.events
+    }
+
     /// 执行任务;Shell 命令支持 {{trigger.output}} / {{trigger.status}} 插值(仅链式触发时有值)。
+    /// live 为该次 execution 的实时输出句柄:Shell 增量写入,HTTP 忽略。
     async fn execute_with_trigger(
         &self,
         task: &Task,
         trigger: Option<&TriggerContext>,
+        live: &std::sync::Arc<crate::live::LiveOutput>,
     ) -> ExecutionResult {
         match &task.task_type {
             TaskType::Http {
@@ -75,12 +97,7 @@ impl Executor {
                         .replace("{{trigger.status}}", &ctx.status),
                     None => cmd.clone(),
                 };
-                Self::execute_shell(
-                    &cmd,
-                    Duration::from_secs(task.timeout_secs),
-                    self.max_output_kb,
-                )
-                .await
+                Self::execute_shell(&cmd, Duration::from_secs(task.timeout_secs), live).await
             }
         }
     }
@@ -248,6 +265,7 @@ impl Executor {
             };
             return (skipped, 0);
         }
+        self.events.bump();
 
         tracing::info!(
             task_id = %task.id,
@@ -256,7 +274,12 @@ impl Executor {
             "execution started"
         );
 
-        let result = self.execute_with_trigger(task, trigger.as_ref()).await;
+        // 实时输出句柄:HTTP 任务虽无流式内容,统一创建保证 /live 端点行为一致
+        let live = self.live.create(&exec_id, self.max_output_kb);
+        let result = self
+            .execute_with_trigger(task, trigger.as_ref(), &live)
+            .await;
+        live.finish();
 
         if let Err(e) = db
             .update_execution(&exec_id, &result.status, &result.output, result.http_status)
@@ -269,6 +292,8 @@ impl Executor {
                 "update execution failed"
             );
         }
+        self.events.bump();
+        self.live.remove(&exec_id);
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -343,43 +368,148 @@ impl Executor {
         }
     }
 
-    async fn execute_shell(cmd: &str, timeout: Duration, max_output_kb: usize) -> ExecutionResult {
-        // 与 HTTP 一致按任务配置超时,防止无限运行占住执行槽。
-        match tokio::time::timeout(
-            timeout,
-            tokio::process::Command::new("sh")
-                .arg("-c")
-                .arg(cmd)
-                .output(),
-        )
-        .await
+    /// Shell 执行:spawn + stdout/stderr 双路增量读取写入 live(实时视图),
+    /// 结束后从 live 快照作为持久化输出(与实时视图同源,超限头尾截断)。
+    async fn execute_shell(
+        cmd: &str,
+        timeout: Duration,
+        live: &std::sync::Arc<crate::live::LiveOutput>,
+    ) -> ExecutionResult {
+        let mut child = match tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg(cmd)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
         {
-            Ok(Ok(out)) => {
-                let status = if out.status.success() {
-                    "success"
-                } else {
-                    "failure"
-                };
-                // stdout + stderr 合并持久化(实时视图同源),超限头尾截断。
-                let mut buf = crate::output::BoundedOutput::new(max_output_kb);
-                buf.push(&out.stdout);
-                buf.push(&out.stderr);
-                ExecutionResult {
-                    status: status.to_string(),
-                    output: buf.snapshot(),
+            Ok(c) => c,
+            Err(e) => {
+                return ExecutionResult {
+                    status: "failure".to_string(),
+                    output: e.to_string(),
                     http_status: None,
-                }
+                };
             }
-            Ok(Err(e)) => ExecutionResult {
-                status: "failure".to_string(),
-                output: e.to_string(),
-                http_status: None,
-            },
-            Err(_) => ExecutionResult {
-                status: "failure".to_string(),
-                output: format!("shell command timed out after {}s", timeout.as_secs()),
-                http_status: None,
-            },
+        };
+        let stdout = child.stdout.take().expect("piped stdout");
+        let stderr = child.stderr.take().expect("piped stderr");
+
+        // 双路并发读取,按到达顺序合并(与实时视图一致)
+        let r1 = tokio::spawn(read_stream(stdout, live.clone()));
+        let r2 = tokio::spawn(read_stream(stderr, live.clone()));
+
+        let mut exit_status: Option<std::process::ExitStatus> = None;
+        let mut timed_out = false;
+        match tokio::time::timeout(timeout, child.wait()).await {
+            Ok(Ok(status)) => exit_status = Some(status),
+            Ok(Err(e)) => {
+                // wait 本身出错罕见;视作失败
+                live.push(e.to_string().as_bytes());
+            }
+            Err(_) => {
+                timed_out = true;
+                let _ = child.kill().await;
+            }
         }
+        // 子进程已结束/被杀,管道随即 EOF;兜底超时防读取挂死
+        let _ = tokio::time::timeout(Duration::from_secs(5), async {
+            let _ = tokio::join!(r1, r2);
+        })
+        .await;
+
+        // 流结束标记在快照之前:最终快照 done=true,输出内容不变
+        live.finish();
+        let success = !timed_out && exit_status.is_some_and(|s| s.success());
+        let mut output = live.snapshot().output;
+        if timed_out {
+            if !output.is_empty() {
+                output.push('\n');
+            }
+            output.push_str(&format!(
+                "shell command timed out after {}s",
+                timeout.as_secs()
+            ));
+        }
+        ExecutionResult {
+            status: if success {
+                "success".to_string()
+            } else {
+                "failure".to_string()
+            },
+            output,
+            http_status: None,
+        }
+    }
+}
+
+/// 持续读取一个管道直到 EOF,把每个数据块推入实时输出。
+async fn read_stream<R: tokio::io::AsyncRead + Unpin>(
+    mut pipe: R,
+    live: std::sync::Arc<crate::live::LiveOutput>,
+) {
+    use tokio::io::AsyncReadExt;
+    let mut buf = [0u8; 8192];
+    loop {
+        match pipe.read(&mut buf).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => live.push(&buf[..n]),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::live::LiveOutput;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn shell_streams_output_incrementally() {
+        let live = Arc::new(LiveOutput::new(64));
+        let bg = live.clone();
+        let watcher = tokio::spawn(async move {
+            // 首个 chunk 到达(version>=1)即证明实时流在执行期间生效
+            let snap = bg.wait_snapshot(0, Duration::from_secs(5)).await;
+            snap.version >= 1
+        });
+        let result = Executor::execute_shell(
+            "echo line1; sleep 0.3; echo line2",
+            Duration::from_secs(10),
+            &live,
+        )
+        .await;
+        assert_eq!(result.status, "success");
+        assert_eq!(result.output, "line1\nline2\n");
+        assert!(
+            watcher.await.unwrap(),
+            "live stream should emit during execution"
+        );
+        assert!(live.snapshot().done);
+    }
+
+    #[tokio::test]
+    async fn shell_timeout_kills_and_keeps_partial_output() {
+        let live = Arc::new(LiveOutput::new(64));
+        let result =
+            Executor::execute_shell("echo start; sleep 30", Duration::from_secs(1), &live).await;
+        assert_eq!(result.status, "failure");
+        assert!(result.output.contains("start"));
+        assert!(result.output.contains("timed out after 1s"));
+        assert!(live.snapshot().done);
+    }
+
+    #[tokio::test]
+    async fn shell_stderr_merged_and_marks_failure() {
+        let live = Arc::new(LiveOutput::new(64));
+        let result = Executor::execute_shell(
+            "echo out; echo err >&2; exit 3",
+            Duration::from_secs(10),
+            &live,
+        )
+        .await;
+        assert_eq!(result.status, "failure");
+        assert!(result.output.contains("out"));
+        assert!(result.output.contains("err"));
     }
 }
