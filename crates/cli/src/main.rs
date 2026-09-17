@@ -38,6 +38,13 @@ enum Command {
 
     #[command(subcommand)]
     Token(TokenCmd),
+
+    /// 维护模式:暂停/恢复定时调度
+    Maintenance {
+        /// status | on | off
+        #[arg(default_value = "status")]
+        action: String,
+    },
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -97,6 +104,14 @@ struct AddArgs {
 
     #[arg(long, default_value_t = 0)]
     max_retries: i64,
+
+    /// 并发上限(达到即跳过;0 = 不限并行)
+    #[arg(long, default_value_t = 1)]
+    max_concurrent: i64,
+
+    /// 标签(逗号分隔)
+    #[arg(long, value_delimiter = ',')]
+    tags: Vec<String>,
 
     #[arg(long, default_value = "")]
     trigger_on_success: Vec<String>,
@@ -163,6 +178,12 @@ struct UpdateArgs {
 
     #[arg(long)]
     max_retries: Option<i64>,
+
+    #[arg(long)]
+    max_concurrent: Option<i64>,
+
+    #[arg(long, value_delimiter = ',')]
+    tags: Option<Vec<String>>,
 
     #[arg(long, value_delimiter = ',')]
     trigger_on_success: Vec<String>,
@@ -269,7 +290,11 @@ struct CreateTaskBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_retries: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    max_concurrent: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     trigger_task_ids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tags: Option<Vec<String>>,
     trigger_on: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     notify_type: Option<String>,
@@ -358,12 +383,18 @@ async fn main() -> Result<()> {
                     timezone: Some(args.timezone),
                     timeout_secs: Some(args.timeout_secs),
                     max_retries: Some(args.max_retries),
+                    max_concurrent: Some(args.max_concurrent),
                     trigger_task_ids: Some(
                         args.trigger_on_success
                             .into_iter()
                             .filter(|s| !s.is_empty())
                             .collect(),
                     ),
+                    tags: if args.tags.is_empty() {
+                        None
+                    } else {
+                        Some(args.tags)
+                    },
                     trigger_on: Some(args.trigger_on),
                     enabled: args.enabled,
                     notify_type: Some(args.notify_type),
@@ -399,6 +430,9 @@ async fn main() -> Result<()> {
                     "timezone": cur["timezone"],
                     "timeout_secs": cur["timeout_secs"],
                     "max_retries": cur["max_retries"],
+                    "max_concurrent": cur["max_concurrent"],
+                    "trigger_task_ids": cur["trigger_task_ids"],
+                    "tags": cur["tags"],
                     "enabled": cur["enabled"],
                     "notify_type": cur["notify_type"],
                     "notify_url": cur["notify_url"],
@@ -466,6 +500,12 @@ async fn main() -> Result<()> {
                 }
                 if let Some(v) = args.max_retries {
                     payload["max_retries"] = serde_json::Value::from(v);
+                }
+                if let Some(v) = args.max_concurrent {
+                    payload["max_concurrent"] = serde_json::Value::from(v);
+                }
+                if let Some(v) = args.tags {
+                    payload["tags"] = serde_json::Value::from(v);
                 }
                 if !args.trigger_on_success.is_empty() {
                     payload["trigger_task_ids"] = serde_json::json!(args.trigger_on_success);
@@ -641,6 +681,23 @@ async fn main() -> Result<()> {
                     .send()
                     .await?;
                 print_response(resp).await?;
+            }
+        },
+        Command::Maintenance { action } => match action.as_str() {
+            "status" => {
+                let resp = client.get(format!("{base}/api/maintenance")).send().await?;
+                print_response(resp).await?;
+            }
+            "on" | "off" => {
+                let resp = client
+                    .post(format!("{base}/api/maintenance"))
+                    .json(&serde_json::json!({ "enabled": action == "on" }))
+                    .send()
+                    .await?;
+                print_response(resp).await?;
+            }
+            other => {
+                anyhow::bail!("unknown maintenance action: {other} (use status | on | off)");
             }
         },
         Command::Exec(cmd) => match cmd {

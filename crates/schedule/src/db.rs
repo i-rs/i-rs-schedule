@@ -13,6 +13,10 @@ pub(crate) fn now_iso() -> String {
     chrono::Utc::now().format(TIMESTAMP_FMT).to_string()
 }
 
+fn default_max_concurrent() -> i64 {
+    1
+}
+
 /// 解析 ISO-8601 时间戳;兼容毫秒与任意精度小数秒两种写法。
 pub(crate) fn parse_iso(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     chrono::NaiveDateTime::parse_from_str(s, TIMESTAMP_FMT)
@@ -31,8 +35,14 @@ pub struct Task {
     pub timezone: String,
     pub timeout_secs: u64,
     pub max_retries: i64,
+    /// 并发互斥:同任务在途执行达到上限即跳过;0 = 不限并行
+    #[serde(default = "default_max_concurrent")]
+    pub max_concurrent: i64,
     #[serde(default)]
     pub trigger_task_ids: Vec<String>,
+    /// 标签(JSON 数组),组织与批量操作用
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub trigger_on: String,
     #[serde(rename = "notify_type")]
     pub notify_type: String,
@@ -80,7 +90,9 @@ impl Task {
             timezone: "UTC".to_string(),
             timeout_secs: 30,
             max_retries: 0,
+            max_concurrent: 1,
             trigger_task_ids: Vec::new(),
+            tags: Vec::new(),
             trigger_on: "success".into(),
             notify_type: "none".to_string(),
             notify_url: String::new(),
@@ -139,8 +151,11 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     let timezone: String = row.get("timezone")?;
     let timeout_secs: u64 = row.get::<_, i64>("timeout_secs")? as u64;
     let max_retries: i64 = row.get("max_retries")?;
+    let max_concurrent: i64 = row.get("max_concurrent")?;
     let trigger_ids_raw: String = row.get("trigger_task_ids")?;
     let trigger_task_ids: Vec<String> = serde_json::from_str(&trigger_ids_raw).unwrap_or_default();
+    let tags_raw: String = row.get("tags")?;
+    let tags: Vec<String> = serde_json::from_str(&tags_raw).unwrap_or_default();
     let trigger_on: String = row.get("trigger_on")?;
     let notify_type: String = row.get("notify_type")?;
     let notify_url: String = row.get("notify_url")?;
@@ -175,7 +190,9 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         timezone,
         timeout_secs,
         max_retries,
+        max_concurrent,
         trigger_task_ids,
+        tags,
         trigger_on,
         notify_type,
         notify_url,
@@ -235,7 +252,9 @@ impl Db {
                 timezone    TEXT NOT NULL DEFAULT 'UTC',
                 timeout_secs INTEGER NOT NULL DEFAULT 30,
                 max_retries INTEGER NOT NULL DEFAULT 0,
+                max_concurrent INTEGER NOT NULL DEFAULT 1,
                 trigger_task_ids TEXT NOT NULL DEFAULT '[]', -- 成功后触发的下游任务(id 数组)
+                tags         TEXT NOT NULL DEFAULT '[]', -- 标签(JSON 数组)
                 trigger_on   TEXT NOT NULL DEFAULT 'success',
                 notify_type TEXT NOT NULL DEFAULT 'none',
                 notify_url  TEXT NOT NULL DEFAULT '',
@@ -280,6 +299,11 @@ impl Db {
                 summary TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_task_executions_task_id ON task_executions(task_id);
             CREATE INDEX IF NOT EXISTS idx_task_executions_started_at ON task_executions(started_at);
             ",
@@ -318,12 +342,26 @@ impl Db {
             )?;
             tracing::info!("migrated tasks table: added max_retries");
         }
+        if !existing.iter().any(|c| c == "max_concurrent") {
+            conn.execute(
+                "ALTER TABLE tasks ADD COLUMN max_concurrent INTEGER NOT NULL DEFAULT 1",
+                [],
+            )?;
+            tracing::info!("migrated tasks table: added max_concurrent");
+        }
         if !existing.iter().any(|c| c == "trigger_task_ids") {
             conn.execute(
                 "ALTER TABLE tasks ADD COLUMN trigger_task_ids TEXT NOT NULL DEFAULT '[]'",
                 [],
             )?;
             tracing::info!("migrated tasks table: added trigger_task_ids");
+        }
+        if !existing.iter().any(|c| c == "tags") {
+            conn.execute(
+                "ALTER TABLE tasks ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'",
+                [],
+            )?;
+            tracing::info!("migrated tasks table: added tags");
         }
         if !existing.iter().any(|c| c == "trigger_on") {
             conn.execute(
@@ -427,8 +465,9 @@ impl Db {
             conn.execute(
                 "INSERT INTO tasks (id, name, task_type, enabled, schedule_type, cron_expr, delay_secs,
                  http_method, http_url, http_headers, http_body, shell_cmd, timezone, timeout_secs,
-                 max_retries, trigger_task_ids, trigger_on, notify_type, notify_url, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+                 max_retries, max_concurrent, trigger_task_ids, tags, trigger_on, notify_type,
+                 notify_url, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
                 params![
                     task.id,
                     task.name,
@@ -445,7 +484,9 @@ impl Db {
                     task.timezone,
                     task.timeout_secs as i64,
                     task.max_retries,
+                    task.max_concurrent,
                     serde_json::to_string(&task.trigger_task_ids).unwrap(),
+                    serde_json::to_string(&task.tags).unwrap(),
                     task.trigger_on,
                     task.notify_type,
                     task.notify_url,
@@ -528,8 +569,9 @@ impl Db {
             conn.execute(
                 "UPDATE tasks SET name=?1, task_type=?2, enabled=?3, schedule_type=?4, cron_expr=?5,
                  delay_secs=?6, http_method=?7, http_url=?8, http_headers=?9, http_body=?10,
-                 shell_cmd=?11, timezone=?12, timeout_secs=?13, max_retries=?14, trigger_task_ids=?15,
-                 trigger_on=?16, notify_type=?17, notify_url=?18, updated_at=?19 WHERE id=?20",
+                 shell_cmd=?11, timezone=?12, timeout_secs=?13, max_retries=?14, max_concurrent=?15,
+                 trigger_task_ids=?16, tags=?17, trigger_on=?18, notify_type=?19, notify_url=?20,
+                 updated_at=?21 WHERE id=?22",
                 params![
                     task.name,
                     task_type_str,
@@ -545,7 +587,9 @@ impl Db {
                     task.timezone,
                     task.timeout_secs as i64,
                     task.max_retries,
+                    task.max_concurrent,
                     serde_json::to_string(&task.trigger_task_ids).unwrap(),
+                    serde_json::to_string(&task.tags).unwrap(),
                     task.trigger_on,
                     task.notify_type,
                     task.notify_url,
@@ -940,6 +984,44 @@ impl Db {
                 .query_map(params![limit], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
+        })
+        .await
+    }
+
+    /// 读取一个设置项(settings 表)。
+    pub async fn get_setting(&self, key: &str) -> anyhow::Result<Option<String>> {
+        let pool = self.pool.clone();
+        let key = key.to_string();
+        spawn_db(pool, move |conn| {
+            let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
+            let mut rows = stmt.query_map(params![key], |r| r.get::<_, String>(0))?;
+            Ok(rows.next().transpose()?)
+        })
+        .await
+    }
+
+    /// SQLite 在线备份:VACUUM INTO 目标文件(文件必须已删除或不存在)。
+    pub async fn vacuum_into(&self, target: &str) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let target = target.to_string();
+        spawn_db(pool, move |conn| {
+            conn.execute("VACUUM INTO ?1", params![target])?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// 写入一个设置项(幂等 upsert)。
+    pub async fn set_setting(&self, key: &str, value: &str) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let (key, value) = (key.to_string(), value.to_string());
+        spawn_db(pool, move |conn| {
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![key, value],
+            )?;
+            Ok(())
         })
         .await
     }

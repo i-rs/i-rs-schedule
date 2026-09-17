@@ -47,7 +47,7 @@ function ExecutionCard({ e, task, onOpen }: { e: TaskExecution; task?: Task; onO
               <span className={`flex h-6 w-6 items-center justify-center rounded-md bg-current/10 ${cfg.color}`}>
                 <Icon className="h-3.5 w-3.5" />
               </span>
-              <Badge variant={e.status === "success" ? "default" : e.status === "running" ? "outline" : "destructive"}>
+              <Badge variant={e.status === "success" ? "default" : e.status === "running" ? "outline" : e.status === "skipped" ? "secondary" : "destructive"}>
                 {t(e.status)}
               </Badge>
               {task && <span className="text-sm font-medium truncate">{task.name}</span>}
@@ -131,6 +131,7 @@ export default function Executions() {
               <TabsTrigger value="success">{t("Success")}</TabsTrigger>
               <TabsTrigger value="failure">{t("Failure")}</TabsTrigger>
               <TabsTrigger value="running">{t("Running")}</TabsTrigger>
+              <TabsTrigger value="skipped">{t("Skipped")}</TabsTrigger>
             </TabsList>
           </Tabs>
           <div className="flex gap-2">

@@ -9,6 +9,7 @@ import { t, toggleLang, useLang } from "@/lib/i18n";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthDialog } from "@/components/AuthDialog";
 import { SettingsDialog } from "@/components/SettingsDialog";
+import { MaintenanceBanner } from "@/components/MaintenanceBanner";
 import { SidebarProvider, Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -149,6 +150,7 @@ function App() {
                   {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
                 </Button>
               </header>
+              <MaintenanceBanner />
               <div className="flex-1 p-4 md:p-8 overflow-auto">
                 <ErrorBoundary>
                   <Suspense

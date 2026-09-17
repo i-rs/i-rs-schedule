@@ -1,4 +1,5 @@
 mod api;
+mod backup;
 mod config;
 mod db;
 mod executor;
@@ -39,9 +40,36 @@ async fn main() -> anyhow::Result<()> {
     let tasks = db.list_enabled_tasks().await?;
     tracing::info!("loaded {} enabled tasks from db", tasks.len());
 
+    // 自动备份:BACKUP_DIR 配置后启用,启动时 + 每日各一次
+    let backup_state = backup::BackupState::default();
+    if let Some(backup_dir) = config.backup_dir.clone() {
+        let backup_db = db.clone();
+        let backup_state_task = backup_state.clone();
+        let keep = config.backup_keep;
+        tokio::spawn(async move {
+            loop {
+                match backup::run_backup(&backup_db, &backup_dir, keep).await {
+                    Ok(ts) => backup_state_task.set(ts),
+                    Err(e) => tracing::warn!(error = %e, "backup failed"),
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(24 * 3600)).await;
+            }
+        });
+    }
+
+    // 维护模式:重启后从 settings 恢复
+    let maintenance_enabled = matches!(
+        db.get_setting("maintenance").await.unwrap().as_deref(),
+        Some("1")
+    );
+    if maintenance_enabled {
+        tracing::info!("maintenance mode restored: enabled");
+    }
+    let maintenance = scheduler::Maintenance::new(maintenance_enabled);
+
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
 
-    let mut scheduler = Scheduler::new();
+    let mut scheduler = Scheduler::new(maintenance_enabled);
     scheduler.load_tasks(tasks);
 
     // 管理员账号(可选):配置了即启用登录
@@ -56,10 +84,11 @@ async fn main() -> anyhow::Result<()> {
         (Some(t), Some(u)) if !u.is_empty() => Some((t, u)),
         _ => None,
     };
-    let executor = Arc::new(Executor::new(
+    let executor = Arc::new(Executor::with_global_concurrency(
         global_notify,
         config.max_output_kb,
         live::Events::new(),
+        config.global_max_concurrent,
     ));
     let scheduler_db = db.clone();
     let api_executor = executor.clone();
@@ -77,6 +106,8 @@ async fn main() -> anyhow::Result<()> {
             static_token: config.token.clone(),
             has_admin,
         },
+        maintenance,
+        backup_state,
     );
 
     tracing::info!("starting server on http://{addr}");

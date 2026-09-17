@@ -7,7 +7,9 @@ export interface Task {
   timezone: string;
   timeout_secs: number;
   max_retries: number;
+  max_concurrent: number;
   trigger_task_ids: string[];
+  tags: string[];
   trigger_on: string;
   next_run_at: string | null;
   notify_type: string;
@@ -38,6 +40,15 @@ export interface LiveSnapshot {
 /** 长轮询获取执行实时输出:cursor 为已见版本号,服务端最多 hold 25s。 */
 export async function getLiveOutput(id: string, cursor: number, signal?: AbortSignal): Promise<LiveSnapshot> {
   return request(`/api/executions/${id}/live?cursor=${cursor}`, { signal });
+}
+
+/** 维护模式:暂停期间 cron 不派发、once 到期记 skipped。 */
+export async function getMaintenance(): Promise<{ enabled: boolean }> {
+  return request("/api/maintenance");
+}
+
+export async function setMaintenance(enabled: boolean): Promise<{ enabled: boolean }> {
+  return request("/api/maintenance", { method: "POST", body: JSON.stringify({ enabled }) });
 }
 
 /** 长轮询全局事件游标:游标前进说明有执行/任务变化。 */
@@ -103,7 +114,9 @@ export interface CreateTaskPayload {
   timezone?: string;
   timeout_secs?: number;
   max_retries?: number;
+  max_concurrent?: number;
   trigger_task_ids?: string[];
+  tags?: string[];
   trigger_on?: string;
   notify_type?: string;
   notify_url?: string;
@@ -133,6 +146,11 @@ export async function runTask(id: string): Promise<TaskExecution> {
 
 export async function enableTask(id: string): Promise<void> {
   await request(`/api/tasks/${id}/enable`, { method: "POST" });
+}
+
+/** 批量操作:enable | disable | delete */
+export async function batchTasks(ids: string[], action: "enable" | "disable" | "delete"): Promise<{ changed: number }> {
+  return request("/api/tasks/batch", { method: "POST", body: JSON.stringify({ ids, action }) });
 }
 
 export async function disableTask(id: string): Promise<void> {

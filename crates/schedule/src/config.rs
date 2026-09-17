@@ -13,6 +13,9 @@ pub struct FileConfig {
     pub notify_type: Option<String>,
     pub notify_url: Option<String>,
     pub max_output_kb: Option<usize>,
+    pub global_max_concurrent: Option<usize>,
+    pub backup_dir: Option<String>,
+    pub backup_keep: Option<usize>,
 }
 
 impl FileConfig {
@@ -45,6 +48,12 @@ pub struct Config {
     pub notify_url: Option<String>,
     /// 任务输出持久化上限(KB,0 = 不限)
     pub max_output_kb: usize,
+    /// 全局并发执行上限(超限等待)
+    pub global_max_concurrent: usize,
+    /// 自动备份目录(未配置 = 关闭)
+    pub backup_dir: Option<String>,
+    /// 备份保留份数
+    pub backup_keep: usize,
 }
 
 impl Config {
@@ -74,6 +83,17 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .or(file.max_output_kb)
             .unwrap_or(64);
+        let global_max_concurrent = env("GLOBAL_MAX_CONCURRENCY")
+            .and_then(|v| v.parse().ok())
+            .or(file.global_max_concurrent)
+            .unwrap_or(32);
+        let backup_dir = env("BACKUP_DIR")
+            .or(file.backup_dir)
+            .filter(|v| !v.is_empty());
+        let backup_keep = env("BACKUP_KEEP")
+            .and_then(|v| v.parse().ok())
+            .or(file.backup_keep)
+            .unwrap_or(7);
 
         Self {
             db_path,
@@ -85,6 +105,9 @@ impl Config {
             notify_type,
             notify_url,
             max_output_kb,
+            global_max_concurrent,
+            backup_dir,
+            backup_keep,
         }
     }
 

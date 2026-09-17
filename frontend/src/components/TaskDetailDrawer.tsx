@@ -28,9 +28,9 @@ function ExecutionRow({ e, onChanged }: { e: TaskExecution; onChanged: () => voi
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <span
-            className={`h-2 w-2 shrink-0 rounded-full ${ok ? "bg-emerald-500" : running ? "bg-blue-500" : "bg-destructive"} ${running ? "animate-pulse" : ""}`}
+            className={`h-2 w-2 shrink-0 rounded-full ${ok ? "bg-emerald-500" : running ? "bg-blue-500" : e.status === "skipped" ? "bg-amber-500" : "bg-destructive"} ${running ? "animate-pulse" : ""}`}
           />
-          <span className={`text-xs font-medium ${ok ? "text-emerald-500" : running ? "text-blue-500" : "text-destructive"}`}>
+          <span className={`text-xs font-medium ${ok ? "text-emerald-500" : running ? "text-blue-500" : e.status === "skipped" ? "text-amber-500" : "text-destructive"}`}>
             {t(e.status)}
           </span>
           {e.attempt > 0 && (
@@ -117,6 +117,11 @@ export function TaskDetailDrawer({ task, onClose }: { task: Task | null; onClose
                     <Link2 className="h-3 w-3" /> {t("Trigger chain")}
                   </span>
                 )}
+                {(task.tags ?? []).map((tag) => (
+                  <span key={tag} className="rounded-full px-1.5 py-px text-[10px] font-medium bg-primary/10 text-primary">
+                    {tag}
+                  </span>
+                ))}
               </div>
             </SheetHeader>
 
@@ -147,6 +152,7 @@ export function TaskDetailDrawer({ task, onClose }: { task: Task | null; onClose
                       <TabsTrigger value="all" className="text-xs px-2">{t("All")}</TabsTrigger>
                       <TabsTrigger value="success" className="text-xs px-2">{t("Success")}</TabsTrigger>
                       <TabsTrigger value="failure" className="text-xs px-2">{t("Failure")}</TabsTrigger>
+                      <TabsTrigger value="skipped" className="text-xs px-2">{t("Skipped")}</TabsTrigger>
                     </TabsList>
                   </Tabs>
                 </div>

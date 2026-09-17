@@ -63,7 +63,9 @@ struct CreateTaskRequest {
     timezone: Option<String>,
     timeout_secs: Option<u64>,
     max_retries: Option<i64>,
+    max_concurrent: Option<i64>,
     trigger_task_ids: Option<Vec<String>>,
+    tags: Option<Vec<String>>,
     trigger_on: Option<String>,
     notify_type: Option<String>,
     notify_url: Option<String>,
@@ -113,8 +115,28 @@ fn build_task_with_hint(body: CreateTaskRequest, id_hint: String) -> Result<Task
     if !(0..=10).contains(&max_retries) {
         return Err("max_retries must be between 0 and 10".into());
     }
+    let max_concurrent = body.max_concurrent.unwrap_or(1);
+    if !(0..=64).contains(&max_concurrent) {
+        return Err("max_concurrent must be between 0 and 64 (0 = unlimited)".into());
+    }
     let mut trigger_task_ids = body.trigger_task_ids.unwrap_or_default();
     trigger_task_ids.retain(|id| !id.trim().is_empty());
+    let mut tags: Vec<String> = body
+        .tags
+        .unwrap_or_default()
+        .into_iter()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+    tags.dedup();
+    if tags.len() > 20 {
+        return Err("too many tags (max 20)".into());
+    }
+    for tag in &tags {
+        if tag.len() > 32 {
+            return Err("tag too long (max 32 bytes)".into());
+        }
+    }
     if trigger_task_ids.contains(&id_hint) {
         return Err("a task cannot trigger itself".into());
     }
@@ -146,7 +168,9 @@ fn build_task_with_hint(body: CreateTaskRequest, id_hint: String) -> Result<Task
     task.timezone = timezone;
     task.timeout_secs = timeout_secs;
     task.max_retries = max_retries;
+    task.max_concurrent = max_concurrent;
     task.trigger_task_ids = trigger_task_ids;
+    task.tags = tags;
     task.trigger_on = trigger_on;
     Ok(task)
 }
@@ -235,6 +259,8 @@ pub fn build_router(
     cmd_tx: mpsc::UnboundedSender<ControlCmd>,
     executor: Arc<Executor>,
     auth: AuthSettings,
+    maintenance: crate::scheduler::Maintenance,
+    backup: crate::backup::BackupState,
 ) -> Router {
     let db = Arc::new(db);
     let cmd_tx = Arc::new(cmd_tx);
@@ -356,6 +382,83 @@ pub fn build_router(
         }
     });
 
+    // 批量操作:逐个复用单任务逻辑(含 scheduler 控制命令与审计)。
+    let db_batch = db.clone();
+    let tx_batch = cmd_tx.clone();
+    let ev_batch = executor.events().clone();
+    router.post("/api/tasks/batch", move |mut req: Request| {
+        let db = db_batch.clone();
+        let tx = tx_batch.clone();
+        let ev = ev_batch.clone();
+        async move {
+            #[derive(Deserialize)]
+            struct BatchBody {
+                ids: Vec<String>,
+                action: String,
+            }
+            let body: BatchBody = req
+                .body()
+                .await
+                .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
+            if !matches!(body.action.as_str(), "enable" | "disable" | "delete") {
+                return Err(err_msg(400, "action must be enable | disable | delete"));
+            }
+            let mut changed = 0u64;
+            for id in &body.ids {
+                let result = match body.action.as_str() {
+                    "enable" => {
+                        let ok = db
+                            .set_enabled(id, true)
+                            .await
+                            .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                        if ok {
+                            if let Ok(Some(task)) = db.get_task(id).await {
+                                let _ = tx.send(ControlCmd::Add(task));
+                            }
+                            let _ = db
+                                .audit("task.enable", &format!("batch enabled task {id}"))
+                                .await;
+                        }
+                        ok
+                    }
+                    "disable" => {
+                        let ok = db
+                            .set_enabled(id, false)
+                            .await
+                            .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                        if ok {
+                            let _ = tx.send(ControlCmd::Remove(id.clone()));
+                            let _ = db
+                                .audit("task.disable", &format!("batch disabled task {id}"))
+                                .await;
+                        }
+                        ok
+                    }
+                    _ => {
+                        let ok = db
+                            .delete_task(id)
+                            .await
+                            .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                        if ok {
+                            let _ = tx.send(ControlCmd::Remove(id.clone()));
+                            let _ = db
+                                .audit("task.delete", &format!("batch deleted task {id}"))
+                                .await;
+                        }
+                        ok
+                    }
+                };
+                if result {
+                    changed += 1;
+                }
+            }
+            if changed > 0 {
+                ev.bump();
+            }
+            ok(serde_json::json!({ "changed": changed }))
+        }
+    });
+
     let db_enable = db.clone();
     let tx_enable = cmd_tx.clone();
     let ev_enable = executor.events().clone();
@@ -409,6 +512,9 @@ pub fn build_router(
     let ex_live = executor.clone();
     let ex_events = executor.clone();
     let ev_import = executor.events().clone();
+    let ev_maint = executor.events().clone();
+    let maintenance_get = maintenance.clone();
+    let maintenance_post = maintenance.clone();
     let db_run = db.clone();
     let executor_ntest = executor.clone();
     router.post("/api/tasks/:id/run", move |req: Request| {
@@ -533,10 +639,62 @@ pub fn build_router(
         }
     });
 
+    // 维护模式:查询与切换(持久化 + 广播 scheduler + 事件刷新)。
+    {
+        let db_maint = db.clone();
+        let tx_maint = cmd_tx.clone();
+        router.get("/api/maintenance", move |_req: Request| {
+            let maintenance = maintenance_get.clone();
+            async move { ok(serde_json::json!({ "enabled": maintenance.enabled() })) }
+        });
+        router.post("/api/maintenance", move |mut req: Request| {
+            let db = db_maint.clone();
+            let tx = tx_maint.clone();
+            let ev = ev_maint.clone();
+            let maintenance = maintenance_post.clone();
+            async move {
+                #[derive(Deserialize)]
+                struct MaintenanceBody {
+                    enabled: bool,
+                }
+                let body: MaintenanceBody = req
+                    .body()
+                    .await
+                    .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
+                maintenance.set(body.enabled);
+                db.set_setting("maintenance", if body.enabled { "1" } else { "0" })
+                    .await
+                    .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                let _ = tx.send(ControlCmd::SetMaintenance(body.enabled));
+                let _ = db
+                    .audit(
+                        "maintenance",
+                        if body.enabled {
+                            "maintenance mode enabled"
+                        } else {
+                            "maintenance mode disabled"
+                        },
+                    )
+                    .await;
+                ev.bump();
+                ok(serde_json::json!({ "enabled": body.enabled }))
+            }
+        });
+    }
+
     // 健康检查:不认证、不查库,探活专用。
     {
-        router.get("/healthz", move |_req: Request| async move {
-            ok(serde_json::json!({ "status": "ok" }))
+        let maintenance_h = maintenance.clone();
+        router.get("/healthz", move |_req: Request| {
+            let maintenance = maintenance_h.clone();
+            let backup = backup.clone();
+            async move {
+                ok(serde_json::json!({
+                    "status": "ok",
+                    "maintenance": maintenance.enabled(),
+                    "last_backup": backup.get(),
+                }))
+            }
         });
     }
 

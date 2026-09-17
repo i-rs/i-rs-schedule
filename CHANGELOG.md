@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.9.0 「秩序」(2026-09-17)
+
+任务多了、跑久了,不失控:并发互斥、标签组织、维护模式、自动备份。
+
+### 新增
+
+- **并发与互斥**:任务级 `max_concurrent`(默认 1,0=不限并行)——上轮未结束即跳过并落库 `skipped` 记录(防重复扣款/通知);重试退避期间占住槽位;全局并发兜底 `GLOBAL_MAX_CONCURRENCY`(默认 32,超限等待)。前端 Skipped 琥珀徽章与过滤;CLI `task add/update --max-concurrent`
+- **标签系统**:任务多标签(`tags` 列,JSON 数组);列表按标签过滤、卡片复选框多选 → 批量启用/禁用/删除(`POST /api/tasks/batch`);标签按名称确定性配色;抽屉展示标签;CLI `--tags "a,b"`
+- **维护模式**:一键全局暂停定时调度——cron 到期跳到下次(错过不补发)、once 到期记 `missed during maintenance`;在途执行不中断;手动 run 不受影响;重启后状态恢复;`GET/POST /api/maintenance`;顶栏琥珀横幅 + 设置对话框开关;CLI `maintenance status|on|off`;`/healthz` 附带状态
+- **自动备份**:`BACKUP_DIR`(未配置=关闭)+ `BACKUP_KEEP`(默认 7)——启动 + 每日 `VACUUM INTO` 在线备份,超出保留份数自动清理;`/healthz` 附带 `last_backup`
+
+### 变更
+
+- `tasks` 表新增 `max_concurrent`、`tags` 列(幂等迁移);新增 `settings` 表
+- 排队模式推迟:重叠执行先靠 skip 兜底,真实需求应调整超时/调度间隔
+
 ## v0.8.0 「实时」(2026-09-17)
 
 执行不再是黑盒:实时输出流、输出上限、推送式刷新、可安装 PWA。
