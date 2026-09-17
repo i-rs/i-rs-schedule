@@ -13,6 +13,7 @@ import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask,
 import { useRef } from "react";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
+import { useEvents } from "@/hooks/useEvents";
 import { TaskDetailDrawer } from "@/components/TaskDetailDrawer";
 import { timeUntil, formatInTz } from "@/lib/time";
 import { cronPreview, testNotification } from "@/api";
@@ -68,6 +69,7 @@ const cronPresets = [
 
 export default function Tasks() {
   const { data: tasksData, loading, error, reload: load } = useApi<Task[]>(listTasks, []);
+  useEvents(load);
   const tasks = tasksData ?? [];
   const [showDialog, setShowDialog] = useState(false);
   const [form, setForm] = useState<TaskForm>(emptyForm);
