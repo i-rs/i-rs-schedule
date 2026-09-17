@@ -1000,6 +1000,17 @@ impl Db {
         .await
     }
 
+    /// SQLite 在线备份:VACUUM INTO 目标文件(文件必须已删除或不存在)。
+    pub async fn vacuum_into(&self, target: &str) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let target = target.to_string();
+        spawn_db(pool, move |conn| {
+            conn.execute("VACUUM INTO ?1", params![target])?;
+            Ok(())
+        })
+        .await
+    }
+
     /// 写入一个设置项(幂等 upsert)。
     pub async fn set_setting(&self, key: &str, value: &str) -> anyhow::Result<()> {
         let pool = self.pool.clone();

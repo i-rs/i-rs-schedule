@@ -260,6 +260,7 @@ pub fn build_router(
     executor: Arc<Executor>,
     auth: AuthSettings,
     maintenance: crate::scheduler::Maintenance,
+    backup: crate::backup::BackupState,
 ) -> Router {
     let db = Arc::new(db);
     let cmd_tx = Arc::new(cmd_tx);
@@ -686,10 +687,12 @@ pub fn build_router(
         let maintenance_h = maintenance.clone();
         router.get("/healthz", move |_req: Request| {
             let maintenance = maintenance_h.clone();
+            let backup = backup.clone();
             async move {
                 ok(serde_json::json!({
                     "status": "ok",
                     "maintenance": maintenance.enabled(),
+                    "last_backup": backup.get(),
                 }))
             }
         });
