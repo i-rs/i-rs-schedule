@@ -45,6 +45,25 @@ enum Command {
         #[arg(default_value = "status")]
         action: String,
     },
+
+    #[command(subcommand)]
+    Var(VarCmd),
+}
+
+#[derive(Subcommand)]
+enum VarCmd {
+    /// 列出全部变量(secret 不显示值)
+    List,
+    /// 设置/更新一个变量
+    Set {
+        key: String,
+        value: String,
+        /// 标记为密钥(API 永不回显)
+        #[arg(long, default_value_t = false)]
+        secret: bool,
+    },
+    /// 删除一个变量
+    Delete { key: String },
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -698,6 +717,27 @@ async fn main() -> Result<()> {
             }
             other => {
                 anyhow::bail!("unknown maintenance action: {other} (use status | on | off)");
+            }
+        },
+        Command::Var(cmd) => match cmd {
+            VarCmd::List => {
+                let resp = client.get(format!("{base}/api/vars")).send().await?;
+                print_response(resp).await?;
+            }
+            VarCmd::Set { key, value, secret } => {
+                let resp = client
+                    .post(format!("{base}/api/vars"))
+                    .json(&serde_json::json!({ "key": key, "value": value, "is_secret": secret }))
+                    .send()
+                    .await?;
+                print_response(resp).await?;
+            }
+            VarCmd::Delete { key } => {
+                let resp = client
+                    .delete(format!("{base}/api/vars/{key}"))
+                    .send()
+                    .await?;
+                print_response(resp).await?;
             }
         },
         Command::Exec(cmd) => match cmd {

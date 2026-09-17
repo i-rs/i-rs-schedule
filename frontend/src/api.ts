@@ -42,6 +42,25 @@ export async function getLiveOutput(id: string, cursor: number, signal?: AbortSi
   return request(`/api/executions/${id}/live?cursor=${cursor}`, { signal });
 }
 
+export interface VarInfo {
+  key: string;
+  value: string | null;
+  is_secret: boolean;
+}
+
+/** 全局变量(is_secret 的 value 永不返回)。 */
+export async function listVars(): Promise<VarInfo[]> {
+  return request("/api/vars");
+}
+
+export async function setVar(key: string, value: string, is_secret: boolean): Promise<void> {
+  await request("/api/vars", { method: "POST", body: JSON.stringify({ key, value, is_secret }) });
+}
+
+export async function deleteVar(key: string): Promise<void> {
+  await request(`/api/vars/${encodeURIComponent(key)}`, { method: "DELETE" });
+}
+
 /** 维护模式:暂停期间 cron 不派发、once 到期记 skipped。 */
 export async function getMaintenance(): Promise<{ enabled: boolean }> {
   return request("/api/maintenance");

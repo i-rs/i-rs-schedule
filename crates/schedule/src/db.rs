@@ -102,6 +102,14 @@ impl Task {
     }
 }
 
+/// 全局变量(插值用);is_secret 的 value 永不通过 API 返回。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Variable {
+    pub key: String,
+    pub value: String,
+    pub is_secret: bool,
+}
+
 #[derive(Clone)]
 pub struct Db {
     pool: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
@@ -302,6 +310,12 @@ impl Db {
             CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS variables (
+                key       TEXT PRIMARY KEY,
+                value     TEXT NOT NULL,
+                is_secret INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE INDEX IF NOT EXISTS idx_task_executions_task_id ON task_executions(task_id);
@@ -1007,6 +1021,53 @@ impl Db {
         spawn_db(pool, move |conn| {
             conn.execute("VACUUM INTO ?1", params![target])?;
             Ok(())
+        })
+        .await
+    }
+
+    /// 列出全部变量(含 secret 明文,仅供执行插值;API 层负责打码)。
+    pub async fn list_variables(&self) -> anyhow::Result<Vec<Variable>> {
+        let pool = self.pool.clone();
+        spawn_db(pool, move |conn| {
+            let mut stmt =
+                conn.prepare("SELECT key, value, is_secret FROM variables ORDER BY key")?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(Variable {
+                        key: r.get("key")?,
+                        value: r.get("value")?,
+                        is_secret: r.get::<_, i64>("is_secret")? != 0,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await
+    }
+
+    /// 写入/更新一个变量(幂等 upsert)。
+    pub async fn upsert_variable(&self, var: &Variable) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let var = var.clone();
+        spawn_db(pool, move |conn| {
+            conn.execute(
+                "INSERT INTO variables (key, value, is_secret) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                 is_secret = excluded.is_secret",
+                params![var.key, var.value, var.is_secret as i64],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// 删除一个变量,返回是否删除。
+    pub async fn delete_variable(&self, key: &str) -> anyhow::Result<bool> {
+        let pool = self.pool.clone();
+        let key = key.to_string();
+        spawn_db(pool, move |conn| {
+            let n = conn.execute("DELETE FROM variables WHERE key = ?1", params![key])?;
+            Ok(n > 0)
         })
         .await
     }

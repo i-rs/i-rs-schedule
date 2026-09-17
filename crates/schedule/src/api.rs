@@ -513,6 +513,7 @@ pub fn build_router(
     let ex_events = executor.clone();
     let ev_import = executor.events().clone();
     let ev_maint = executor.events().clone();
+    let ev_vars = executor.events().clone();
     let maintenance_get = maintenance.clone();
     let maintenance_post = maintenance.clone();
     let db_run = db.clone();
@@ -681,6 +682,89 @@ pub fn build_router(
             }
         });
     }
+
+    // 全局变量:secret 的 value 永不回传前端。
+    let db_vars_list = db.clone();
+    let db_vars_set = db.clone();
+    let db_vars_del = db.clone();
+    let ev_vars_list = ev_vars.clone();
+    let ev_vars_set = ev_vars.clone();
+    let ev_vars_del = ev_vars.clone();
+    router.get("/api/vars", move |_req: Request| {
+        let db = db_vars_list.clone();
+        let ev = ev_vars_list.clone();
+        async move {
+            let _ = ev;
+            let vars = db
+                .list_variables()
+                .await
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+            let items: Vec<serde_json::Value> = vars
+                .iter()
+                .map(|v| {
+                    serde_json::json!({
+                        "key": v.key,
+                        "value": if v.is_secret { serde_json::Value::Null } else { serde_json::Value::String(v.value.clone()) },
+                        "is_secret": v.is_secret,
+                    })
+                })
+                .collect();
+            ok(items)
+        }
+    });
+    router.post("/api/vars", move |mut req: Request| {
+        let db = db_vars_set.clone();
+        let ev = ev_vars_set.clone();
+        async move {
+            #[derive(Deserialize)]
+            struct VarBody {
+                key: String,
+                value: String,
+                #[serde(default)]
+                is_secret: bool,
+            }
+            let body: VarBody = req
+                .body()
+                .await
+                .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
+            let key = body.key.trim().to_string();
+            if key.is_empty()
+                || key.len() > 64
+                || !key
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+            {
+                return Err(err_msg(400, "key must be 1..=64 chars of [A-Za-z0-9_.-]"));
+            }
+            if body.value.len() > 8192 {
+                return Err(err_msg(400, "value too long (max 8192 bytes)"));
+            }
+            db.upsert_variable(&crate::db::Variable {
+                key,
+                value: body.value,
+                is_secret: body.is_secret,
+            })
+            .await
+            .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+            ev.bump();
+            ok(serde_json::json!({ "ok": true }))
+        }
+    });
+    router.delete("/api/vars/:key", move |req: Request| {
+        let db = db_vars_del.clone();
+        let ev = ev_vars_del.clone();
+        async move {
+            let key: String = req.param("key").map_err(|_| err_msg(400, "missing key"))?;
+            let removed = db
+                .delete_variable(&key)
+                .await
+                .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+            if removed {
+                ev.bump();
+            }
+            ok(serde_json::json!({ "removed": removed }))
+        }
+    });
 
     // 健康检查:不认证、不查库,探活专用。
     {

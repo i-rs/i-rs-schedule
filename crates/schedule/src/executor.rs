@@ -10,6 +10,64 @@ pub struct TriggerContext {
     pub status: String,
 }
 
+/// Webhook 触发的上下文:请求体与 query 参数。
+#[derive(Debug, Clone)]
+pub struct EventContext {
+    pub body: String,
+    pub query: HashMap<String, String>,
+}
+
+/// 单次执行的插值上下文(变量一次性从 DB 加载)。
+type Vars = HashMap<String, String>;
+
+/// 统一插值:{{trigger.*}} / {{event.*}} / {{var.*}};逐类单遍替换,不递归展开。
+fn interpolate(
+    input: &str,
+    vars: &Vars,
+    trigger: Option<&TriggerContext>,
+    event: Option<&EventContext>,
+) -> String {
+    let mut s = input.to_string();
+    if let Some(ctx) = trigger {
+        s = s
+            .replace("{{trigger.output}}", &truncate_str(&ctx.output, 10_000))
+            .replace("{{trigger.status}}", &ctx.status);
+    }
+    if let Some(ev) = event {
+        s = s.replace("{{event.body}}", &truncate_str(&ev.body, 10_000));
+        for (k, v) in &ev.query {
+            s = s.replace(&format!("{{{{event.query.{k}}}}}"), v);
+        }
+    }
+    for (k, v) in vars {
+        s = s.replace(&format!("{{{{var.{k}}}}}"), v);
+    }
+    s
+}
+
+/// HTTP headers 的值做插值(非字符串值原样保留)。
+fn interpolate_headers(
+    headers: &serde_json::Value,
+    vars: &Vars,
+    trigger: Option<&TriggerContext>,
+    event: Option<&EventContext>,
+) -> serde_json::Value {
+    match headers {
+        serde_json::Value::Object(map) => serde_json::Value::Object(
+            map.iter()
+                .map(|(k, v)| match v {
+                    serde_json::Value::String(s) => (
+                        k.clone(),
+                        serde_json::Value::String(interpolate(s, vars, trigger, event)),
+                    ),
+                    other => (k.clone(), other.clone()),
+                })
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
 fn truncate_str(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
@@ -80,12 +138,15 @@ impl Executor {
         &self.events
     }
 
-    /// 执行任务;Shell 命令支持 {{trigger.output}} / {{trigger.status}} 插值(仅链式触发时有值)。
+    /// 执行任务;shell cmd 与 http url/body/header 值支持
+    /// {{trigger.*}} / {{event.*}} / {{var.*}} 插值。
     /// live 为该次 execution 的实时输出句柄:Shell 增量写入,HTTP 忽略。
     async fn execute_with_trigger(
         &self,
         task: &Task,
         trigger: Option<&TriggerContext>,
+        event: Option<&EventContext>,
+        vars: &Vars,
         live: &std::sync::Arc<crate::live::LiveOutput>,
     ) -> ExecutionResult {
         match &task.task_type {
@@ -95,16 +156,18 @@ impl Executor {
                 headers,
                 body,
             } => {
-                self.execute_http(method, url, headers, body.as_deref(), task.timeout_secs)
+                let url = interpolate(url, vars, trigger, event);
+                let body = body
+                    .as_deref()
+                    .map(|b| interpolate(b, vars, trigger, event));
+                let headers = headers
+                    .as_ref()
+                    .map(|h| interpolate_headers(h, vars, trigger, event));
+                self.execute_http(method, &url, &headers, body.as_deref(), task.timeout_secs)
                     .await
             }
             TaskType::Shell { cmd } => {
-                let cmd = match trigger {
-                    Some(ctx) => cmd
-                        .replace("{{trigger.output}}", &truncate_str(&ctx.output, 10000))
-                        .replace("{{trigger.status}}", &ctx.status),
-                    None => cmd.clone(),
-                };
+                let cmd = interpolate(cmd, vars, trigger, event);
                 Self::execute_shell(&cmd, Duration::from_secs(task.timeout_secs), live).await
             }
         }
@@ -116,7 +179,7 @@ impl Executor {
     /// create_execution 失败时返回一个内存构造的 `status="skipped"` 记录(不入库),
     /// 并打 warn 日志;execute 与 update_execution 的失败均告警但不影响返回。
     pub async fn execute_and_record(&self, db: &Db, task: &Task) -> TaskExecution {
-        self.execute_and_record_depth(db, task, 0, None).await
+        self.execute_and_record_depth(db, task, 0, None, None).await
     }
 
     /// depth 用于链式触发的环防护(最大 10 层)。装箱返回以打破递归 future 的 Send 推导。
@@ -126,8 +189,9 @@ impl Executor {
         task: &'a Task,
         depth: u32,
         trigger: Option<TriggerContext>,
+        event: Option<EventContext>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TaskExecution> + Send + 'a>> {
-        Box::pin(self.execute_and_record_depth_impl(db, task, depth, trigger))
+        Box::pin(self.execute_and_record_depth_impl(db, task, depth, trigger, event))
     }
 
     async fn execute_and_record_depth_impl(
@@ -136,6 +200,7 @@ impl Executor {
         task: &Task,
         depth: u32,
         trigger: Option<TriggerContext>,
+        event: Option<EventContext>,
     ) -> TaskExecution {
         // 任务级并发互斥:达到 max_concurrent 即跳过并落库(重试退避期间占住槽位)。
         // max_concurrent = 0 表示不限并行。
@@ -151,7 +216,7 @@ impl Executor {
         // 全局并发兜底:超限等待(信号量 guard 在作用域结束时释放)
         let _permit = self.global_permits.clone().acquire_owned().await;
 
-        let result = self.run_with_retries(db, task, depth, trigger).await;
+        let result = self.run_with_retries(db, task, depth, trigger, event).await;
 
         if task.max_concurrent > 0 {
             self.release_slot(&task.id);
@@ -208,10 +273,11 @@ impl Executor {
         task: &Task,
         depth: u32,
         trigger: Option<TriggerContext>,
+        event: Option<EventContext>,
     ) -> TaskExecution {
         let mut attempt: i64 = 0;
         let (mut final_exec, mut duration_ms) = self
-            .execute_attempt(db, task, attempt, trigger.clone())
+            .execute_attempt(db, task, attempt, trigger.clone(), event.clone())
             .await;
         // 失败且还有重试额度:指数退避后重试(30s 起步,封顶 8 分钟)。
         while final_exec.status == "failure" && attempt < task.max_retries {
@@ -225,7 +291,7 @@ impl Executor {
             tokio::time::sleep(backoff).await;
             attempt += 1;
             let (exec, ms) = self
-                .execute_attempt(db, task, attempt, trigger.clone())
+                .execute_attempt(db, task, attempt, trigger.clone(), event.clone())
                 .await;
             final_exec = exec;
             duration_ms = ms;
@@ -294,7 +360,13 @@ impl Executor {
                         let ctx = ctx.clone();
                         tokio::spawn(async move {
                             let _ = exec
-                                .execute_and_record_depth(&next_db, &next, depth + 1, Some(ctx))
+                                .execute_and_record_depth(
+                                    &next_db,
+                                    &next,
+                                    depth + 1,
+                                    Some(ctx),
+                                    None,
+                                )
                                 .await;
                         });
                     } else {
@@ -316,6 +388,7 @@ impl Executor {
         task: &Task,
         attempt: i64,
         trigger: Option<TriggerContext>,
+        event: Option<EventContext>,
     ) -> (TaskExecution, u64) {
         let exec_id = uuid::Uuid::new_v4().to_string();
         let started_at = crate::db::now_iso();
@@ -354,10 +427,19 @@ impl Executor {
             "execution started"
         );
 
+        // 全局变量一次性加载(插值用);加载失败按无变量继续
+        let vars: Vars = db
+            .list_variables()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|v| (v.key, v.value))
+            .collect();
+
         // 实时输出句柄:HTTP 任务虽无流式内容,统一创建保证 /live 端点行为一致
         let live = self.live.create(&exec_id, self.max_output_kb);
         let result = self
-            .execute_with_trigger(task, trigger.as_ref(), &live)
+            .execute_with_trigger(task, trigger.as_ref(), event.as_ref(), &vars, &live)
             .await;
         live.finish();
 
