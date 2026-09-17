@@ -6,6 +6,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getTaskStats, listTaskExecutions, type Task, type TaskExecution } from "@/api";
 import { useApi } from "@/hooks/useApi";
+import { LiveTerminal } from "@/components/LiveTerminal";
 import { t, tf, useLang } from "@/lib/i18n";
 import { timeAgo, fullTime } from "@/lib/time";
 import { fmtDuration } from "@/lib/duration";
@@ -18,17 +19,18 @@ function fmtMs(ms: number | null): string {
   return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
 }
 
-function ExecutionRow({ e }: { e: TaskExecution }) {
+function ExecutionRow({ e, onChanged }: { e: TaskExecution; onChanged: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const ok = e.status === "success";
+  const running = e.status === "running";
   return (
     <div className="rounded-md border border-border/50 px-2.5 py-2 text-sm space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <span
-            className={`h-2 w-2 shrink-0 rounded-full ${ok ? "bg-emerald-500" : e.status === "running" ? "bg-blue-500" : "bg-destructive"}`}
+            className={`h-2 w-2 shrink-0 rounded-full ${ok ? "bg-emerald-500" : running ? "bg-blue-500" : "bg-destructive"} ${running ? "animate-pulse" : ""}`}
           />
-          <span className={`text-xs font-medium ${ok ? "text-emerald-500" : e.status === "running" ? "text-blue-500" : "text-destructive"}`}>
+          <span className={`text-xs font-medium ${ok ? "text-emerald-500" : running ? "text-blue-500" : "text-destructive"}`}>
             {t(e.status)}
           </span>
           {e.attempt > 0 && (
@@ -41,7 +43,8 @@ function ExecutionRow({ e }: { e: TaskExecution }) {
           <span title={fullTime(e.started_at)}>{timeAgo(e.started_at)}</span>
         </div>
       </div>
-      {e.output && (
+      {running && <LiveTerminal execId={e.id} onDone={onChanged} />}
+      {e.output && !running && (
         <div>
           <button
             onClick={() => setExpanded(!expanded)}
@@ -67,11 +70,11 @@ export function TaskDetailDrawer({ task, onClose }: { task: Task | null; onClose
   const lang = useLang();
   void lang;
 
-  const { data: stats } = useApi(
+  const { data: stats, reload: statsReload } = useApi(
     () => (task ? getTaskStats(task.id) : Promise.resolve(null)),
     [task?.id],
   );
-  const { data: execData, loading } = useApi<TaskExecution[]>(
+  const { data: execData, loading, reload } = useApi<TaskExecution[]>(
     () => (task ? listTaskExecutions(task.id, limit) : Promise.resolve([])),
     [task?.id, limit],
   );
@@ -155,7 +158,16 @@ export function TaskDetailDrawer({ task, onClose }: { task: Task | null; onClose
                   <p className="text-xs text-muted-foreground py-6 text-center">{t("No executions yet.")}</p>
                 ) : (
                   <div className="space-y-2">
-                    {visible.map((e) => <ExecutionRow key={e.id} e={e} />)}
+                    {visible.map((e) => (
+                      <ExecutionRow
+                        key={e.id}
+                        e={e}
+                        onChanged={() => {
+                          reload();
+                          statsReload();
+                        }}
+                      />
+                    ))}
                     {!atEnd && (
                       <div className="flex justify-center pt-1">
                         <Button variant="outline" size="sm" onClick={() => setLimit((l) => l + 20)} disabled={loading}>
