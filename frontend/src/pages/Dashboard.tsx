@@ -4,6 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { listTasks, listExecutions, dailyStats, type Task, type TaskExecution, type DailyStat } from "@/api";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
+import { useEvents } from "@/hooks/useEvents";
 import { timeAgo, fullTime } from "@/lib/time";
 import { t, useLang } from "@/lib/i18n";
 import { ListTodo, Play, CheckCircle2, AlertCircle } from "lucide-react";
@@ -21,11 +22,8 @@ export default function Dashboard() {
     [],
   );
 
-  // 常驻仪表盘:每 30s 自动刷新
-  useEffect(() => {
-    const id = setInterval(reload, 30_000);
-    return () => clearInterval(id);
-  }, [reload]);
+  // 常驻仪表盘:事件长轮询驱动刷新(有变化才 refetch)
+  useEvents(reload);
 
   useEffect(() => {
     if (error) toast.error(`Failed to load dashboard: ${error.message}`);

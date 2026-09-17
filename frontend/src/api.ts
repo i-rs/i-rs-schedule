@@ -27,6 +27,24 @@ export interface TaskExecution {
   finished_at: string | null;
 }
 
+export interface LiveSnapshot {
+  version: number;
+  output: string;
+  total: number | null;
+  done: boolean;
+  status?: string;
+}
+
+/** 长轮询获取执行实时输出:cursor 为已见版本号,服务端最多 hold 25s。 */
+export async function getLiveOutput(id: string, cursor: number, signal?: AbortSignal): Promise<LiveSnapshot> {
+  return request(`/api/executions/${id}/live?cursor=${cursor}`, { signal });
+}
+
+/** 长轮询全局事件游标:游标前进说明有执行/任务变化。 */
+export async function pollEvents(cursor: number, signal?: AbortSignal): Promise<{ cursor: number }> {
+  return request(`/api/events?cursor=${cursor}`, { signal });
+}
+
 interface ApiEnvelope<T> {
   code: number;
   message: string;

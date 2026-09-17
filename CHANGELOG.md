@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.8.0 「实时」(2026-09-17)
+
+执行不再是黑盒:实时输出流、输出上限、推送式刷新、可安装 PWA。
+
+### 新增
+
+- **实时输出流**:执行中任务的输出实时上屏(长轮询,`GET /api/executions/:id/live?cursor=`);任务抽屉与执行详情内嵌终端风格实时视图(光标闪烁、字节数、自动滚动);完成后与落库内容一致
+- **输出持久化上限**:`MAX_OUTPUT_KB`(config.toml `max_output_kb`,默认 64,0=不限)——超限保留头部+尾部+截断标记,内存与落库占用有界
+- **事件驱动刷新**:`GET /api/events?cursor=` 长轮询,任何执行/任务变化推进游标;Tasks / Executions / Dashboard / 抽屉全部改为事件触发刷新(断线自动退避重连),Dashboard 30s 轮询退役
+- **PWA**:manifest + 图标 + 极简 service worker(静态资源 cache-first、壳层 network-first、`/api/*` 永不缓存),可安装到手机桌面
+
+### 变更
+
+- Shell 执行从 `.output()` 改为 spawn + stdout/stderr 双路增量读取:输出按到达顺序**合并持久化**(此前成功只存 stdout、失败只存 stderr);`{{trigger.output}}` 拿到合并输出
+- HTTP 响应体改为 `bytes()` + 有界累积;超时行为不变(杀进程、保留已产出输出并追加超时提示)
+- 技术说明:desirable 响应体为 `Full<Bytes>`,不支持流式 SSE,实时流以 25s 长轮询实现(复用现有 Bearer 认证,体验等价)
+
 ## v0.7.0 「多人」(2026-09-16)
 
 从个人工具走向团队工具:登录、Token 管理、审计、全局通知。

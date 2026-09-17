@@ -9,6 +9,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { listExecutions, listTasks, type TaskExecution, type Task } from "@/api";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
+import { useEvents } from "@/hooks/useEvents";
+import { LiveTerminal } from "@/components/LiveTerminal";
 import { t, tf, useLang } from "@/lib/i18n";
 import { timeAgo } from "@/lib/time";
 import { fmtDuration } from "@/lib/duration";
@@ -106,6 +108,7 @@ export default function Executions() {
       ]),
     [filterTaskId, limit],
   );
+  useEvents(reload);
 
   useEffect(() => {
     if (error) toast.error(`${t("Failed to load executions: ")}${error.message}`);
@@ -231,9 +234,19 @@ export default function Executions() {
               </div>
               <div className="space-y-1.5">
                 <p className="text-xs text-muted-foreground">{t("Output")}</p>
-                <pre className="rounded-md border border-border/50 bg-muted/50 p-3 text-xs text-muted-foreground font-mono max-h-[50vh] overflow-auto whitespace-pre-wrap">
-                  {detailExec.output ?? t("(no output)")}
-                </pre>
+                {detailExec.status === "running" ? (
+                  <LiveTerminal
+                    execId={detailExec.id}
+                    onDone={() => {
+                      reload();
+                      setDetailExec(null);
+                    }}
+                  />
+                ) : (
+                  <pre className="rounded-md border border-border/50 bg-muted/50 p-3 text-xs text-muted-foreground font-mono max-h-[50vh] overflow-auto whitespace-pre-wrap">
+                    {detailExec.output ?? t("(no output)")}
+                  </pre>
+                )}
               </div>
             </>
           )}
