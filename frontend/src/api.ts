@@ -9,6 +9,7 @@ export interface Task {
   max_retries: number;
   max_concurrent: number;
   trigger_task_ids: string[];
+  tags: string[];
   trigger_on: string;
   next_run_at: string | null;
   notify_type: string;
@@ -106,6 +107,7 @@ export interface CreateTaskPayload {
   max_retries?: number;
   max_concurrent?: number;
   trigger_task_ids?: string[];
+  tags?: string[];
   trigger_on?: string;
   notify_type?: string;
   notify_url?: string;
@@ -135,6 +137,11 @@ export async function runTask(id: string): Promise<TaskExecution> {
 
 export async function enableTask(id: string): Promise<void> {
   await request(`/api/tasks/${id}/enable`, { method: "POST" });
+}
+
+/** 批量操作:enable | disable | delete */
+export async function batchTasks(ids: string[], action: "enable" | "disable" | "delete"): Promise<{ changed: number }> {
+  return request("/api/tasks/batch", { method: "POST", body: JSON.stringify({ ids, action }) });
 }
 
 export async function disableTask(id: string): Promise<void> {

@@ -40,6 +40,9 @@ pub struct Task {
     pub max_concurrent: i64,
     #[serde(default)]
     pub trigger_task_ids: Vec<String>,
+    /// 标签(JSON 数组),组织与批量操作用
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub trigger_on: String,
     #[serde(rename = "notify_type")]
     pub notify_type: String,
@@ -89,6 +92,7 @@ impl Task {
             max_retries: 0,
             max_concurrent: 1,
             trigger_task_ids: Vec::new(),
+            tags: Vec::new(),
             trigger_on: "success".into(),
             notify_type: "none".to_string(),
             notify_url: String::new(),
@@ -150,6 +154,8 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     let max_concurrent: i64 = row.get("max_concurrent")?;
     let trigger_ids_raw: String = row.get("trigger_task_ids")?;
     let trigger_task_ids: Vec<String> = serde_json::from_str(&trigger_ids_raw).unwrap_or_default();
+    let tags_raw: String = row.get("tags")?;
+    let tags: Vec<String> = serde_json::from_str(&tags_raw).unwrap_or_default();
     let trigger_on: String = row.get("trigger_on")?;
     let notify_type: String = row.get("notify_type")?;
     let notify_url: String = row.get("notify_url")?;
@@ -186,6 +192,7 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         max_retries,
         max_concurrent,
         trigger_task_ids,
+        tags,
         trigger_on,
         notify_type,
         notify_url,
@@ -247,6 +254,7 @@ impl Db {
                 max_retries INTEGER NOT NULL DEFAULT 0,
                 max_concurrent INTEGER NOT NULL DEFAULT 1,
                 trigger_task_ids TEXT NOT NULL DEFAULT '[]', -- 成功后触发的下游任务(id 数组)
+                tags         TEXT NOT NULL DEFAULT '[]', -- 标签(JSON 数组)
                 trigger_on   TEXT NOT NULL DEFAULT 'success',
                 notify_type TEXT NOT NULL DEFAULT 'none',
                 notify_url  TEXT NOT NULL DEFAULT '',
@@ -342,6 +350,13 @@ impl Db {
                 [],
             )?;
             tracing::info!("migrated tasks table: added trigger_task_ids");
+        }
+        if !existing.iter().any(|c| c == "tags") {
+            conn.execute(
+                "ALTER TABLE tasks ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'",
+                [],
+            )?;
+            tracing::info!("migrated tasks table: added tags");
         }
         if !existing.iter().any(|c| c == "trigger_on") {
             conn.execute(
@@ -445,9 +460,9 @@ impl Db {
             conn.execute(
                 "INSERT INTO tasks (id, name, task_type, enabled, schedule_type, cron_expr, delay_secs,
                  http_method, http_url, http_headers, http_body, shell_cmd, timezone, timeout_secs,
-                 max_retries, max_concurrent, trigger_task_ids, trigger_on, notify_type, notify_url,
-                 created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+                 max_retries, max_concurrent, trigger_task_ids, tags, trigger_on, notify_type,
+                 notify_url, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
                 params![
                     task.id,
                     task.name,
@@ -466,6 +481,7 @@ impl Db {
                     task.max_retries,
                     task.max_concurrent,
                     serde_json::to_string(&task.trigger_task_ids).unwrap(),
+                    serde_json::to_string(&task.tags).unwrap(),
                     task.trigger_on,
                     task.notify_type,
                     task.notify_url,
@@ -549,8 +565,8 @@ impl Db {
                 "UPDATE tasks SET name=?1, task_type=?2, enabled=?3, schedule_type=?4, cron_expr=?5,
                  delay_secs=?6, http_method=?7, http_url=?8, http_headers=?9, http_body=?10,
                  shell_cmd=?11, timezone=?12, timeout_secs=?13, max_retries=?14, max_concurrent=?15,
-                 trigger_task_ids=?16, trigger_on=?17, notify_type=?18, notify_url=?19,
-                 updated_at=?20 WHERE id=?21",
+                 trigger_task_ids=?16, tags=?17, trigger_on=?18, notify_type=?19, notify_url=?20,
+                 updated_at=?21 WHERE id=?22",
                 params![
                     task.name,
                     task_type_str,
@@ -568,6 +584,7 @@ impl Db {
                     task.max_retries,
                     task.max_concurrent,
                     serde_json::to_string(&task.trigger_task_ids).unwrap(),
+                    serde_json::to_string(&task.tags).unwrap(),
                     task.trigger_on,
                     task.notify_type,
                     task.notify_url,

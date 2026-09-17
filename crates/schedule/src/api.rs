@@ -65,6 +65,7 @@ struct CreateTaskRequest {
     max_retries: Option<i64>,
     max_concurrent: Option<i64>,
     trigger_task_ids: Option<Vec<String>>,
+    tags: Option<Vec<String>>,
     trigger_on: Option<String>,
     notify_type: Option<String>,
     notify_url: Option<String>,
@@ -120,6 +121,22 @@ fn build_task_with_hint(body: CreateTaskRequest, id_hint: String) -> Result<Task
     }
     let mut trigger_task_ids = body.trigger_task_ids.unwrap_or_default();
     trigger_task_ids.retain(|id| !id.trim().is_empty());
+    let mut tags: Vec<String> = body
+        .tags
+        .unwrap_or_default()
+        .into_iter()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+    tags.dedup();
+    if tags.len() > 20 {
+        return Err("too many tags (max 20)".into());
+    }
+    for tag in &tags {
+        if tag.len() > 32 {
+            return Err("tag too long (max 32 bytes)".into());
+        }
+    }
     if trigger_task_ids.contains(&id_hint) {
         return Err("a task cannot trigger itself".into());
     }
@@ -153,6 +170,7 @@ fn build_task_with_hint(body: CreateTaskRequest, id_hint: String) -> Result<Task
     task.max_retries = max_retries;
     task.max_concurrent = max_concurrent;
     task.trigger_task_ids = trigger_task_ids;
+    task.tags = tags;
     task.trigger_on = trigger_on;
     Ok(task)
 }
@@ -359,6 +377,83 @@ pub fn build_router(
                 }
                 false => Err(err_msg(404, "not found")),
             }
+        }
+    });
+
+    // 批量操作:逐个复用单任务逻辑(含 scheduler 控制命令与审计)。
+    let db_batch = db.clone();
+    let tx_batch = cmd_tx.clone();
+    let ev_batch = executor.events().clone();
+    router.post("/api/tasks/batch", move |mut req: Request| {
+        let db = db_batch.clone();
+        let tx = tx_batch.clone();
+        let ev = ev_batch.clone();
+        async move {
+            #[derive(Deserialize)]
+            struct BatchBody {
+                ids: Vec<String>,
+                action: String,
+            }
+            let body: BatchBody = req
+                .body()
+                .await
+                .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
+            if !matches!(body.action.as_str(), "enable" | "disable" | "delete") {
+                return Err(err_msg(400, "action must be enable | disable | delete"));
+            }
+            let mut changed = 0u64;
+            for id in &body.ids {
+                let result = match body.action.as_str() {
+                    "enable" => {
+                        let ok = db
+                            .set_enabled(id, true)
+                            .await
+                            .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                        if ok {
+                            if let Ok(Some(task)) = db.get_task(id).await {
+                                let _ = tx.send(ControlCmd::Add(task));
+                            }
+                            let _ = db
+                                .audit("task.enable", &format!("batch enabled task {id}"))
+                                .await;
+                        }
+                        ok
+                    }
+                    "disable" => {
+                        let ok = db
+                            .set_enabled(id, false)
+                            .await
+                            .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                        if ok {
+                            let _ = tx.send(ControlCmd::Remove(id.clone()));
+                            let _ = db
+                                .audit("task.disable", &format!("batch disabled task {id}"))
+                                .await;
+                        }
+                        ok
+                    }
+                    _ => {
+                        let ok = db
+                            .delete_task(id)
+                            .await
+                            .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                        if ok {
+                            let _ = tx.send(ControlCmd::Remove(id.clone()));
+                            let _ = db
+                                .audit("task.delete", &format!("batch deleted task {id}"))
+                                .await;
+                        }
+                        ok
+                    }
+                };
+                if result {
+                    changed += 1;
+                }
+            }
+            if changed > 0 {
+                ev.bump();
+            }
+            ok(serde_json::json!({ "changed": changed }))
         }
     });
 

@@ -117,6 +117,11 @@ export function TaskDetailDrawer({ task, onClose }: { task: Task | null; onClose
                     <Link2 className="h-3 w-3" /> {t("Trigger chain")}
                   </span>
                 )}
+                {(task.tags ?? []).map((tag) => (
+                  <span key={tag} className="rounded-full px-1.5 py-px text-[10px] font-medium bg-primary/10 text-primary">
+                    {tag}
+                  </span>
+                ))}
               </div>
             </SheetHeader>
 

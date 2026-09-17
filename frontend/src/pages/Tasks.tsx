@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, runTask, exportTasks, importTasks, type Task } from "@/api";
+import { listTasks, createTask, deleteTask, enableTask, disableTask, updateTask, runTask, exportTasks, importTasks, batchTasks, type Task } from "@/api";
 import { useRef } from "react";
 import { toast } from "@/hooks/useToast";
 import { useApi } from "@/hooks/useApi";
@@ -17,7 +17,7 @@ import { useEvents } from "@/hooks/useEvents";
 import { TaskDetailDrawer } from "@/components/TaskDetailDrawer";
 import { timeUntil, formatInTz } from "@/lib/time";
 import { cronPreview, testNotification } from "@/api";
-import { t as tr } from "@/lib/i18n";
+import { t as tr, tf } from "@/lib/i18n";
 import { Plus, Trash2, Play, Square, Pencil, RefreshCw, Globe, Terminal, Clock, Inbox, Zap, Loader2, Copy, Check, Bell, AlarmClock, Link2 } from "lucide-react";
 
 interface TaskForm {
@@ -35,6 +35,7 @@ interface TaskForm {
   max_retries: string;
   max_concurrent: string;
   trigger_task_ids: string[];
+  tags: string;
   trigger_on: "success" | "failure" | "always";
   notify_type: "none" | "webhook" | "feishu" | "dingtalk";
   notify_url: string;
@@ -55,6 +56,7 @@ const emptyForm: TaskForm = {
   max_retries: "0",
   max_concurrent: "1",
   trigger_task_ids: [],
+  tags: "",
   trigger_on: "success",
   notify_type: "none",
   notify_url: "",
@@ -69,10 +71,17 @@ const cronPresets = [
   { label: "Weekdays 9am", expr: "0 0 9 * * 1-5" },
 ];
 
+/** 标签名 → 稳定 hue(0..359),用于确定性配色 */
+function tagHash(tag: string): number {
+  let h = 0;
+  for (let i = 0; i < tag.length; i++) h = (h * 31 + tag.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
 export default function Tasks() {
   const { data: tasksData, loading, error, reload: load } = useApi<Task[]>(listTasks, []);
   useEvents(load);
-  const tasks = tasksData ?? [];
+  const allTasks = tasksData ?? [];
   const [showDialog, setShowDialog] = useState(false);
   const [form, setForm] = useState<TaskForm>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -81,6 +90,11 @@ export default function Tasks() {
   const [detailTask, setDetailTask] = useState<Task | null>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [tagFilter, setTagFilter] = useState("all");
+  const [batchBusy, setBatchBusy] = useState(false);
+  const tasks = tagFilter === "all" ? allTasks : allTasks.filter((t) => (t.tags ?? []).includes(tagFilter));
+  const allTags = [...new Set(allTasks.flatMap((t) => t.tags ?? []))].sort();
   const [cronPreviewState, setCronPreviewState] = useState<{ times: string[] } | { error: string } | null>(null);
   const [testingNotify, setTestingNotify] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -137,6 +151,7 @@ export default function Tasks() {
       max_retries: parseInt(form.max_retries) || 0,
       max_concurrent: parseInt(form.max_concurrent) || 0,
       trigger_task_ids: form.trigger_task_ids,
+      tags: form.tags.split(",").map((s) => s.trim()).filter(Boolean),
       trigger_on: form.trigger_on,
       notify_type: form.notify_type,
       ...(form.notify_type !== "none" ? { notify_url: form.notify_url } : {}),
@@ -179,6 +194,7 @@ export default function Tasks() {
       max_retries: (t.max_retries ?? 0).toString(),
       max_concurrent: (t.max_concurrent ?? 1).toString(),
       trigger_task_ids: t.trigger_task_ids ?? [],
+      tags: (t.tags ?? []).join(", "),
       trigger_on: (t.trigger_on as TaskForm["trigger_on"]) || "success",
       notify_type: (t.notify_type as TaskForm["notify_type"]) || "none",
       notify_url: t.notify_url ?? "",
@@ -219,6 +235,7 @@ export default function Tasks() {
       timeout_secs: src.timeout_secs,
       max_retries: src.max_retries,
       max_concurrent: src.max_concurrent,
+      tags: src.tags ?? [],
       notify_type: src.notify_type,
       ...(src.notify_type !== "none" ? { notify_url: src.notify_url } : {}),
     };
@@ -297,6 +314,17 @@ export default function Tasks() {
           <Button variant="outline" onClick={() => importFileRef.current?.click()}>
             Import
           </Button>
+          <Select value={tagFilter} onValueChange={(v) => setTagFilter(v || "all")}>
+            <SelectTrigger className="w-36 h-9 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{tr("All tags")}</SelectItem>
+              {allTags.map((tag) => (
+                <SelectItem key={tag} value={tag}>{tag}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button size="icon" variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -305,6 +333,53 @@ export default function Tasks() {
           </Button>
         </div>
       </div>
+
+      {selected.size > 0 && (
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
+          <span className="text-xs text-muted-foreground tabular-nums">{tf("{n} selected", { n: selected.size })}</span>
+          <div className="flex-1" />
+          <Button size="sm" variant="outline" disabled={batchBusy}
+            onClick={async () => {
+              setBatchBusy(true);
+              try {
+                const r = await batchTasks([...selected], "enable");
+                toast.success(tr("Enabled") + ` (${r.changed})`);
+                setSelected(new Set());
+                await load();
+              } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); } finally { setBatchBusy(false); }
+            }}>
+            <Play className="h-3.5 w-3.5" /> {tr("Enable")}
+          </Button>
+          <Button size="sm" variant="outline" disabled={batchBusy}
+            onClick={async () => {
+              setBatchBusy(true);
+              try {
+                const r = await batchTasks([...selected], "disable");
+                toast.success(tr("Disabled") + ` (${r.changed})`);
+                setSelected(new Set());
+                await load();
+              } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); } finally { setBatchBusy(false); }
+            }}>
+            <Square className="h-3.5 w-3.5" /> {tr("Disable")}
+          </Button>
+          <Button size="sm" variant="destructive" disabled={batchBusy}
+            onClick={async () => {
+              if (!window.confirm(tf("Delete {n} selected tasks?", { n: selected.size }))) return;
+              setBatchBusy(true);
+              try {
+                const r = await batchTasks([...selected], "delete");
+                toast.success(tr("Deleted") + ` (${r.changed})`);
+                setSelected(new Set());
+                await load();
+              } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); } finally { setBatchBusy(false); }
+            }}>
+            <Trash2 className="h-3.5 w-3.5" /> {tr("Delete")}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+            {tr("Cancel")}
+          </Button>
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-3">
@@ -349,11 +424,23 @@ export default function Tasks() {
                 key={t.id}
                 onClick={() => setDetailTask(t)}
                 style={{ animationDelay: `${Math.min(i, 12) * 40}ms` }}
-                className={`group/task stagger-item cursor-pointer border-l-4 shadow-[var(--shadow-card)] transition-all duration-200 hover:shadow-[var(--shadow-card-hover)] ${t.enabled ? "border-l-primary" : "border-l-muted-foreground/40"}`}
+                className={`group/task stagger-item cursor-pointer border-l-4 shadow-[var(--shadow-card)] transition-all duration-200 hover:shadow-[var(--shadow-card-hover)] ${t.enabled ? "border-l-primary" : "border-l-muted-foreground/40"} ${selected.has(t.id) ? "ring-2 ring-primary/50" : ""}`}
               >
                 <CardContent className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-4 gap-3">
                   <div className="space-y-1.5 flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(t.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const next = new Set(selected);
+                          if (e.target.checked) next.add(t.id);
+                          else next.delete(t.id);
+                          setSelected(next);
+                        }}
+                        className="h-3.5 w-3.5 accent-[var(--primary)] cursor-pointer"
+                      />
                       <span className={`flex h-6 w-6 items-center justify-center rounded-md ${t.task_type.type === "http" ? "bg-primary/10 text-primary" : "bg-violet-500/10 text-violet-500"}`}>
                         <TypeIcon className="h-3.5 w-3.5" />
                       </span>
@@ -378,6 +465,18 @@ export default function Tasks() {
                       {t.trigger_task_ids.length > 0 && (
                         <Link2 className="h-3 w-3 text-sky-400" />
                       )}
+                      {(t.tags ?? []).map((tag) => (
+                        <span
+                          key={tag}
+                          className="rounded-full px-1.5 py-px text-[10px] font-medium"
+                          style={{
+                            backgroundColor: `oklch(0.55 0.12 ${(tagHash(tag) % 360)}deg / 0.18)`,
+                            color: `oklch(0.75 0.13 ${tagHash(tag) % 360}deg)`,
+                          }}
+                        >
+                          {tag}
+                        </span>
+                      ))}
                     </div>
                     <div className="flex items-center gap-1.5 min-w-0">
                       <p className="text-xs text-muted-foreground truncate font-mono">{url}</p>
@@ -513,6 +612,15 @@ export default function Tasks() {
                           value={form.max_concurrent}
                           onChange={(e) => setForm({ ...form, max_concurrent: e.target.value })}
                           className="w-24 h-7 text-xs"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                        <Label className="text-xs text-muted-foreground shrink-0">{tr("Tags")}</Label>
+                        <Input
+                          value={form.tags}
+                          placeholder="prod, daily"
+                          onChange={(e) => setForm({ ...form, tags: e.target.value })}
+                          className="flex-1 min-w-0 h-7 text-xs"
                         />
                       </div>
                     </div>
