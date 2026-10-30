@@ -14,9 +14,12 @@ import {
   listVars,
   setVar,
   deleteVar,
+  listSessions,
+  revokeSession,
   type ApiTokenInfo,
   type AuditEntry,
   type VarInfo,
+  type SessionInfo,
 } from "@/api";
 import { toast } from "@/hooks/useToast";
 import { timeAgo } from "@/lib/time";
@@ -34,6 +37,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [varKey, setVarKey] = useState("");
   const [varValue, setVarValue] = useState("");
   const [varSecret, setVarSecret] = useState(false);
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
 
   const load = async () => {
     try {
@@ -41,6 +45,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       setAudit(await listAudit(50));
       setMaintenanceState((await getMaintenance()).enabled);
       setVars(await listVars());
+      listSessions().then(setSessions).catch(() => {});
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
@@ -83,6 +88,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             <TabsTrigger value="tokens" className="flex-1">{t("API Tokens")}</TabsTrigger>
             <TabsTrigger value="audit" className="flex-1">{t("Audit Log")}</TabsTrigger>
             <TabsTrigger value="vars" className="flex-1">{t("Variables")}</TabsTrigger>
+            <TabsTrigger value="sessions" className="flex-1">{t("Sessions")}</TabsTrigger>
           </TabsList>
 
           <div className="mt-3 space-y-3">
@@ -243,6 +249,36 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             <p className="text-[10px] text-muted-foreground">
               {t("Use {{var.key}} in shell commands and HTTP fields.")}
             </p>
+          </div>
+
+          <div className="mt-3 space-y-1">
+            <p className="text-xs text-muted-foreground">{t("Active login sessions")}</p>
+            {sessions.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-2 text-center">{t("No active sessions")}</p>
+            ) : (
+              sessions.map((s) => {
+                const expired = new Date(s.expires_at).getTime() < Date.now();
+                return (
+                  <div key={s.token_hash} className={`flex items-center justify-between rounded-md border border-border/50 px-2.5 py-1.5 ${expired ? "opacity-50" : ""}`}>
+                    <div className="min-w-0">
+                      <code className="text-xs font-mono">{s.token_hash.slice(0, 12)}…</code>
+                      <p className="text-[10px] text-muted-foreground tabular-nums">
+                        {expired ? t("Expired") : `${t("Expires")} ${timeAgo(s.expires_at)}`}
+                      </p>
+                    </div>
+                    <Button size="icon-sm" variant="ghost" disabled={expired} title={t("Revoke")}
+                      onClick={async () => {
+                        try {
+                          await revokeSession(s.token_hash);
+                          setSessions(await listSessions());
+                        } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); }
+                      }}>
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                );
+              })
+            )}
           </div>
         </Tabs>
       </DialogContent>

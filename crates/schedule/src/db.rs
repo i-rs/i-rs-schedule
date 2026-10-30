@@ -49,6 +49,9 @@ pub struct Task {
     /// 漏跑告警:到期后宽限期内无任何执行尝试则推送(cron 任务有效)
     #[serde(default)]
     pub missed_alert: bool,
+    /// 重启补跑:启动时发现错过的触发点(24h 内)补跑一次
+    #[serde(default)]
+    pub catchup: bool,
     pub trigger_on: String,
     #[serde(rename = "notify_type")]
     pub notify_type: String,
@@ -101,6 +104,7 @@ impl Task {
             tags: Vec::new(),
             hook_secret_hash: None,
             missed_alert: false,
+            catchup: false,
             trigger_on: "success".into(),
             notify_type: "none".to_string(),
             notify_url: String::new(),
@@ -174,6 +178,7 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     let tags: Vec<String> = serde_json::from_str(&tags_raw).unwrap_or_default();
     let hook_secret_hash: Option<String> = row.get("hook_secret_hash")?;
     let missed_alert: bool = row.get::<_, i64>("missed_alert")? != 0;
+    let catchup: bool = row.get::<_, i64>("catchup")? != 0;
     let trigger_on: String = row.get("trigger_on")?;
     let notify_type: String = row.get("notify_type")?;
     let notify_url: String = row.get("notify_url")?;
@@ -213,6 +218,7 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         tags,
         hook_secret_hash,
         missed_alert,
+        catchup,
         trigger_on,
         notify_type,
         notify_url,
@@ -277,6 +283,7 @@ impl Db {
                 tags         TEXT NOT NULL DEFAULT '[]', -- 标签(JSON 数组)
                 hook_secret_hash TEXT, -- Webhook 触发 secret 的 sha256(NULL = 未开启)
                 missed_alert INTEGER NOT NULL DEFAULT 0, -- 漏跑告警
+                catchup      INTEGER NOT NULL DEFAULT 0, -- 重启补跑
                 trigger_on   TEXT NOT NULL DEFAULT 'success',
                 notify_type TEXT NOT NULL DEFAULT 'none',
                 notify_url  TEXT NOT NULL DEFAULT '',
@@ -402,6 +409,13 @@ impl Db {
             )?;
             tracing::info!("migrated tasks table: added missed_alert");
         }
+        if !existing.iter().any(|c| c == "catchup") {
+            conn.execute(
+                "ALTER TABLE tasks ADD COLUMN catchup INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+            tracing::info!("migrated tasks table: added catchup");
+        }
         if !existing.iter().any(|c| c == "trigger_on") {
             conn.execute(
                 "ALTER TABLE tasks ADD COLUMN trigger_on TEXT NOT NULL DEFAULT 'success'",
@@ -505,8 +519,8 @@ impl Db {
                 "INSERT INTO tasks (id, name, task_type, enabled, schedule_type, cron_expr, delay_secs,
                  http_method, http_url, http_headers, http_body, shell_cmd, timezone, timeout_secs,
                  max_retries, max_concurrent, trigger_task_ids, tags, hook_secret_hash,
-                 missed_alert, trigger_on, notify_type, notify_url, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+                 missed_alert, catchup, trigger_on, notify_type, notify_url, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
                 params![
                     task.id,
                     task.name,
@@ -528,6 +542,7 @@ impl Db {
                     serde_json::to_string(&task.tags).unwrap(),
                     task.hook_secret_hash,
                     task.missed_alert as i64,
+                    task.catchup as i64,
                     task.trigger_on,
                     task.notify_type,
                     task.notify_url,
@@ -612,7 +627,8 @@ impl Db {
                  delay_secs=?6, http_method=?7, http_url=?8, http_headers=?9, http_body=?10,
                  shell_cmd=?11, timezone=?12, timeout_secs=?13, max_retries=?14, max_concurrent=?15,
                  trigger_task_ids=?16, tags=?17, hook_secret_hash=?18, missed_alert=?19,
-                 trigger_on=?20, notify_type=?21, notify_url=?22, updated_at=?23 WHERE id=?24",
+                 catchup=?20, trigger_on=?21, notify_type=?22, notify_url=?23, updated_at=?24
+                 WHERE id=?25",
                 params![
                     task.name,
                     task_type_str,
@@ -633,6 +649,7 @@ impl Db {
                     serde_json::to_string(&task.tags).unwrap(),
                     task.hook_secret_hash,
                     task.missed_alert as i64,
+                    task.catchup as i64,
                     task.trigger_on,
                     task.notify_type,
                     task.notify_url,
@@ -876,10 +893,41 @@ impl Db {
         format!("{:x}", hasher.finalize())
     }
 
+    /// 口令哈希:argon2id(PHC 字符串,自带盐)。
+    pub fn hash_password(password: &str) -> String {
+        use argon2::password_hash::SaltString;
+        use argon2::{Argon2, PasswordHasher};
+        // 用既有 rand 依赖生成盐字节,避免 password_hash 的 getrandom 特性
+        use rand::RngCore;
+        let mut bytes = [0u8; 16];
+        rand::rng().fill_bytes(&mut bytes);
+        let salt = SaltString::encode_b64(&bytes).expect("salt encode failed");
+        Argon2::default()
+            .hash_password(password.as_bytes(), &salt)
+            .expect("argon2 hash failed")
+            .to_string()
+    }
+
+    /// 口令校验:argon2id 直接验证;旧版裸 sha256 兼容比对。
+    fn verify_password(password: &str, stored: &str) -> bool {
+        if stored.starts_with("$argon2") {
+            use argon2::{Argon2, PasswordHash, PasswordVerifier};
+            PasswordHash::new(stored)
+                .map(|ph| {
+                    Argon2::default()
+                        .verify_password(password.as_bytes(), &ph)
+                        .is_ok()
+                })
+                .unwrap_or(false)
+        } else {
+            Self::sha256_hex(password) == stored
+        }
+    }
+
     pub async fn seed_admin(&self, username: &str, password: &str) -> anyhow::Result<()> {
         let pool = self.pool.clone();
         let username = username.to_string();
-        let hash = Self::sha256_hex(password);
+        let hash = Self::hash_password(password);
         spawn_db(pool, move |conn| {
             conn.execute(
                 "INSERT INTO users (username, password_hash) VALUES (?1, ?2)
@@ -894,7 +942,7 @@ impl Db {
     pub async fn verify_admin(&self, username: &str, password: &str) -> anyhow::Result<bool> {
         let pool = self.pool.clone();
         let username = username.to_string();
-        let hash = Self::sha256_hex(password);
+        let password = password.to_string();
         spawn_db(pool, move |conn| {
             let stored: Option<String> = conn
                 .query_row(
@@ -903,7 +951,20 @@ impl Db {
                     |r| r.get(0),
                 )
                 .ok();
-            Ok(stored == Some(hash))
+            let Some(stored) = stored else {
+                return Ok(false);
+            };
+            if !Self::verify_password(password.as_str(), stored.as_str()) {
+                return Ok(false);
+            }
+            // 惰性升级:旧版裸 sha256 → argon2id
+            if !stored.starts_with("$argon2") {
+                conn.execute(
+                    "UPDATE users SET password_hash = ?1 WHERE username = ?2",
+                    params![Self::hash_password(password.as_str()), username],
+                )?;
+            }
+            Ok(true)
         })
         .await
     }
@@ -1121,6 +1182,80 @@ impl Db {
         .await
     }
 
+    /// 列出登录会话(token_hash 即标识,非敏感;含已过期)。
+    pub async fn list_sessions(&self) -> anyhow::Result<Vec<(String, String, String)>> {
+        let pool = self.pool.clone();
+        spawn_db(pool, move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT token_hash, created_at, expires_at FROM sessions ORDER BY created_at DESC",
+            )?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await
+    }
+
+    /// 吊销一个登录会话,返回是否存在。
+    pub async fn revoke_session(&self, token_hash: &str) -> anyhow::Result<bool> {
+        let pool = self.pool.clone();
+        let token_hash = token_hash.to_string();
+        spawn_db(pool, move |conn| {
+            let n = conn.execute(
+                "DELETE FROM sessions WHERE token_hash = ?1",
+                params![token_hash],
+            )?;
+            Ok(n > 0)
+        })
+        .await
+    }
+
+    /// (仅测试)直写/读取口令哈希,模拟旧版本数据。
+    #[cfg(test)]
+    pub(crate) async fn set_password_hash_raw(
+        &self,
+        username: &str,
+        hash: &str,
+    ) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let (u, h) = (username.to_string(), hash.to_string());
+        spawn_db(pool, move |conn| {
+            conn.execute(
+                "UPDATE users SET password_hash = ?1 WHERE username = ?2",
+                params![h, u],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn get_password_hash_raw(
+        &self,
+        username: &str,
+    ) -> anyhow::Result<Option<String>> {
+        let pool = self.pool.clone();
+        let u = username.to_string();
+        spawn_db(pool, move |conn| {
+            let v = conn
+                .query_row(
+                    "SELECT password_hash FROM users WHERE username = ?1",
+                    params![u],
+                    |r| r.get(0),
+                )
+                .ok();
+            Ok(v)
+        })
+        .await
+    }
+
     /// 设置/清除任务的 Webhook secret 哈希,返回任务是否存在。
     pub async fn set_hook_secret(&self, id: &str, hash: Option<String>) -> anyhow::Result<bool> {
         let pool = self.pool.clone();
@@ -1161,5 +1296,52 @@ impl Db {
             Ok(affected as u64)
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::*;
+
+    fn temp_db() -> (Db, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("irs-auth-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::new(dir.join("t.db").to_str().unwrap()).unwrap();
+        (db, dir)
+    }
+
+    #[test]
+    fn argon2_roundtrip_and_reject() {
+        let hash = Db::hash_password("s3cret");
+        assert!(hash.starts_with("$argon2"), "PHC format: {hash}");
+        assert!(Db::verify_password("s3cret", &hash));
+        assert!(!Db::verify_password("wrong", &hash));
+        // 两个同口令的哈希不同(随机盐)
+        assert_ne!(Db::hash_password("s3cret"), hash);
+    }
+
+    #[test]
+    fn legacy_sha256_still_verified() {
+        let legacy = Db::sha256_hex("oldpw");
+        assert!(Db::verify_password("oldpw", &legacy));
+        assert!(!Db::verify_password("nope", &legacy));
+    }
+
+    #[tokio::test]
+    async fn verify_admin_lazy_upgrades_legacy_hash() {
+        let (db, dir) = temp_db();
+        db.seed_admin("admin", "pw").await.unwrap();
+
+        // 模拟旧版本种子:写回裸 sha256
+        db.set_password_hash_raw("admin", &Db::sha256_hex("pw"))
+            .await
+            .unwrap();
+        assert!(db.verify_admin("admin", "pw").await.unwrap());
+        // 已被惰性升级为 argon2
+        let upgraded = db.get_password_hash_raw("admin").await.unwrap().unwrap();
+        assert!(upgraded.starts_with("$argon2"));
+        // 错误密码仍拒绝
+        assert!(!db.verify_admin("admin", "bad").await.unwrap());
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

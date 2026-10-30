@@ -69,6 +69,7 @@ struct CreateTaskRequest {
     trigger_task_ids: Option<Vec<String>>,
     tags: Option<Vec<String>>,
     missed_alert: Option<bool>,
+    catchup: Option<bool>,
     trigger_on: Option<String>,
     notify_type: Option<String>,
     notify_url: Option<String>,
@@ -175,6 +176,7 @@ fn build_task_with_hint(body: CreateTaskRequest, id_hint: String) -> Result<Task
     task.trigger_task_ids = trigger_task_ids;
     task.tags = tags;
     task.missed_alert = body.missed_alert.unwrap_or(false);
+    task.catchup = body.catchup.unwrap_or(false);
     task.trigger_on = trigger_on;
     Ok(task)
 }
@@ -184,6 +186,44 @@ fn build_task_with_hint(body: CreateTaskRequest, id_hint: String) -> Result<Task
 pub struct AuthSettings {
     pub static_token: Option<String>,
     pub has_admin: bool,
+}
+
+/// 登录失败滑动窗口:同一用户名 15 分钟内 10 次失败 → 拒绝(内存态,重启清零)。
+struct LoginGuard {
+    failures: std::sync::Mutex<HashMap<String, Vec<std::time::Instant>>>,
+}
+
+impl LoginGuard {
+    const WINDOW: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+    const MAX_FAILURES: usize = 10;
+
+    fn new() -> Self {
+        Self {
+            failures: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn blocked(&self, username: &str) -> bool {
+        let mut map = self.failures.lock().unwrap();
+        let now = std::time::Instant::now();
+        let list = map.entry(username.to_lowercase()).or_default();
+        list.retain(|t| now.duration_since(*t) < Self::WINDOW);
+        list.len() >= Self::MAX_FAILURES
+    }
+
+    fn record_failure(&self, username: &str) {
+        let mut map = self.failures.lock().unwrap();
+        map.entry(username.to_lowercase())
+            .or_default()
+            .push(std::time::Instant::now());
+    }
+
+    fn clear(&self, username: &str) {
+        self.failures
+            .lock()
+            .unwrap()
+            .remove(&username.to_lowercase());
+    }
 }
 
 /// Bearer 认证中间件:静态 token / 会话 / API token 任一匹配即放行;
@@ -515,6 +555,7 @@ pub fn build_router(
     });
 
     let ex_live = executor.clone();
+    let metrics_render = executor.metrics().clone();
     let ex_events = executor.clone();
     let ev_import = executor.events().clone();
     let ev_maint = executor.events().clone();
@@ -524,6 +565,7 @@ pub fn build_router(
     let ex_hook = executor.clone();
     let maintenance_get = maintenance.clone();
     let maintenance_post = maintenance.clone();
+    let maintenance_metrics = maintenance.clone();
     let db_run = db.clone();
     let executor_ntest = executor.clone();
     router.post("/api/tasks/:id/run", move |req: Request| {
@@ -924,6 +966,8 @@ pub fn build_router(
         let db_metrics = db.clone();
         router.get("/metrics", move |_req: Request| {
             let db = db_metrics.clone();
+            let metrics = metrics_render.clone();
+            let maintenance = maintenance_metrics.clone();
             async move {
                 let (total, success, failure, enabled) = db.stats().await.unwrap_or((0, 0, 0, 0));
                 let body = format!(
@@ -938,7 +982,17 @@ pub fn build_router(
                      irs_executions_failure_total {failure}\n\
                      # HELP irs_tasks_enabled Currently enabled tasks.\n\
                      # TYPE irs_tasks_enabled gauge\n\
-                     irs_tasks_enabled {enabled}\n"
+                     irs_tasks_enabled {enabled}\n\
+                     {}\
+                     # HELP irs_executions_skipped_total Skipped executions (overlap, maintenance, db errors).\n\
+                     # TYPE irs_executions_skipped_total counter\n\
+                     irs_executions_skipped_total {}\n\
+                     # HELP irs_maintenance_active Whether maintenance mode is on.\n\
+                     # TYPE irs_maintenance_active gauge\n\
+                     irs_maintenance_active {}\n",
+                    metrics.render_histogram(),
+                    metrics.skipped(),
+                    if maintenance.enabled() { 1 } else { 0 },
                 );
                 // body 为纯文本 String,with_status 实际不会失败(与 err_msg 的 unwrap 同理)。
                 let resp: Response = Response::with_status(200, body).unwrap();
@@ -1146,8 +1200,10 @@ pub fn build_router(
     // 登录:校验管理员账密,签发 30 天会话 token。
     if auth.has_admin {
         let db_login = db.clone();
+        let guard = Arc::new(LoginGuard::new());
         router.post("/api/auth/login", move |mut req: Request| {
             let db = db_login.clone();
+            let guard = guard.clone();
             async move {
                 #[derive(Deserialize)]
                 struct LoginBody {
@@ -1158,13 +1214,18 @@ pub fn build_router(
                     .body()
                     .await
                     .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
+                if guard.blocked(&body.username) {
+                    return Err(err_msg(429, "too many login attempts; try again later"));
+                }
                 if !db
                     .verify_admin(&body.username, &body.password)
                     .await
                     .unwrap_or(false)
                 {
+                    guard.record_failure(&body.username);
                     return Err(err_msg(401, "invalid credentials"));
                 }
+                guard.clear(&body.username);
                 let (token, expires_at) = db
                     .create_session(30)
                     .await
@@ -1235,6 +1296,48 @@ pub fn build_router(
         });
     }
 
+    // 登录会话管理:列表(哈希标识)与吊销。
+    {
+        let db_sess_list = db.clone();
+        let db_sess_del = db.clone();
+        router.get("/api/auth/sessions", move |_req: Request| {
+            let db = db_sess_list.clone();
+            async move {
+                let rows = db
+                    .list_sessions()
+                    .await
+                    .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                let items: Vec<serde_json::Value> = rows
+                    .into_iter()
+                    .map(|(token_hash, created_at, expires_at)| {
+                        serde_json::json!({
+                            "token_hash": token_hash,
+                            "created_at": created_at,
+                            "expires_at": expires_at,
+                        })
+                    })
+                    .collect();
+                ok(items)
+            }
+        });
+        router.delete("/api/auth/sessions/:hash", move |req: Request| {
+            let db = db_sess_del.clone();
+            async move {
+                let hash: String = req
+                    .param("hash")
+                    .map_err(|_| err_msg(400, "missing hash"))?;
+                let removed = db
+                    .revoke_session(&hash)
+                    .await
+                    .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                if removed {
+                    let _ = db.audit("session.revoke", "session revoked").await;
+                }
+                ok(serde_json::json!({ "removed": removed }))
+            }
+        });
+    }
+
     // 审计日志查询。
     // (limit 通过 query string 传入)
     {
@@ -1268,4 +1371,26 @@ pub fn build_router(
     }
 
     router
+}
+
+#[cfg(test)]
+mod login_guard_tests {
+    use super::*;
+
+    #[test]
+    fn blocks_after_max_failures_and_clears() {
+        let g = LoginGuard::new();
+        for _ in 0..LoginGuard::MAX_FAILURES {
+            assert!(!g.blocked("alice"));
+            g.record_failure("alice");
+        }
+        assert!(g.blocked("alice"));
+        // 用户名大小写归一
+        assert!(g.blocked("ALICE"));
+        // 其他用户不受影响
+        assert!(!g.blocked("bob"));
+        // 成功登录清零
+        g.clear("alice");
+        assert!(!g.blocked("alice"));
+    }
 }

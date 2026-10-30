@@ -11,6 +11,7 @@ export interface Task {
   trigger_task_ids: string[];
   tags: string[];
   missed_alert: boolean;
+  catchup: boolean;
   trigger_on: string;
   next_run_at: string | null;
   notify_type: string;
@@ -47,6 +48,21 @@ export interface VarInfo {
   key: string;
   value: string | null;
   is_secret: boolean;
+}
+
+export interface SessionInfo {
+  token_hash: string;
+  created_at: string;
+  expires_at: string;
+}
+
+/** 登录会话(哈希标识)。 */
+export async function listSessions(): Promise<SessionInfo[]> {
+  return request("/api/auth/sessions");
+}
+
+export async function revokeSession(tokenHash: string): Promise<void> {
+  await request(`/api/auth/sessions/${encodeURIComponent(tokenHash)}`, { method: "DELETE" });
 }
 
 /** 全局变量(is_secret 的 value 永不返回)。 */
@@ -138,6 +154,7 @@ export interface CreateTaskPayload {
   trigger_task_ids?: string[];
   tags?: string[];
   missed_alert?: boolean;
+  catchup?: boolean;
   trigger_on?: string;
   notify_type?: string;
   notify_url?: string;

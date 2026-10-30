@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.11.0 「加固」(2026-10-31)
+
+第四期开工:整体架构审计后,把"可信"补到最后一环——全是攻击面与故障面。
+
+### 新增
+
+- **重启补跑**:任务级 `catchup`(默认关)——启动时发现错过的 cron 触发点(宽限 5 分钟、最长回溯 `CATCHUP_MAX_LAG_HOURS`=24h)补跑一次;与漏跑检测共享判定逻辑;维护模式下不补跑。表单复选框 + CLI `--catchup`
+- **密码哈希升级**:裸 sha256(无盐)→ **argon2id**(PHC,随机盐);旧版本种子账号登录成功时惰性升级
+- **登录限速**:同一用户名 15 分钟内 10 次失败 → 429(内存窗口,重启清零);成功登录清零
+- **通知签名**:通用 webhook 渠道附 `X-i-rs-Signature: sha256=<HMAC-SHA256(secret, body)>`(`NOTIFY_WEBHOOK_SECRET`);接收方可验证告警来源
+- **会话管理**:设置对话框 Sessions 标签页 + `GET/DELETE /api/auth/sessions` + CLI `session list|revoke`(哈希标识)
+- **指标补全**:`/metrics` 新增 `irs_execution_duration_seconds` 直方图(10ms→120s 共 12 桶)、`irs_executions_skipped_total`、`irs_maintenance_active`
+
+### 变更
+
+- `tasks` 表新增 `catchup` 列(幂等迁移);新依赖 argon2、hmac
+- 限速为进程内存态,重启清零(自托管场景可接受)
+
 ## v0.10.0 「事件」(2026-09-18)
 
 不止定时:外部世界也能触发任务,沉默故障也有人知道。

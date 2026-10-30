@@ -33,6 +33,21 @@ pub fn last_due_utc(task: &Task) -> Option<chrono::DateTime<chrono::Utc>> {
     last
 }
 
+/// 共享判定:任务是否存在"已到期但此后无执行"的期望时间。
+/// 返回期望时间 ISO;查询失败/未到期/已有执行一律 None(宁可漏报不误报)。
+pub async fn missed_expected(db: &Db, task: &Task) -> Option<String> {
+    let expected = last_due_utc(task)?;
+    let now = chrono::Utc::now();
+    if now - expected < chrono::Duration::seconds(GRACE_SECS) {
+        return None;
+    }
+    let expected_iso = expected.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    match db.has_execution_since(&task.id, &expected_iso).await {
+        Ok(false) => Some(expected_iso),
+        _ => None,
+    }
+}
+
 /// 单轮扫描:漏跑 → 推送告警(同一期望时间只告警一次)。
 async fn scan(db: &Db, ex: &Executor, suppress: &Suppress) {
     let tasks = match db.list_enabled_tasks().await {
@@ -42,27 +57,13 @@ async fn scan(db: &Db, ex: &Executor, suppress: &Suppress) {
             return;
         }
     };
-    let now = chrono::Utc::now();
     for task in tasks {
         if !task.missed_alert {
             continue;
         }
-        let Some(expected) = last_due_utc(&task) else {
+        let Some(expected_iso) = missed_expected(db, &task).await else {
             continue;
         };
-        if now - expected < chrono::Duration::seconds(GRACE_SECS) {
-            continue;
-        }
-        let expected_iso = expected.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        match db.has_execution_since(&task.id, &expected_iso).await {
-            Ok(true) => continue,
-            // 查询失败按已有执行处理,宁可漏告警不误报
-            Ok(false) => {}
-            Err(e) => {
-                tracing::warn!(error = %e, task_id = %task.id, "watchdog query failed");
-                continue;
-            }
-        }
         {
             let mut map = suppress.lock().unwrap();
             if map.get(&task.id).is_some_and(|prev| prev == &expected_iso) {

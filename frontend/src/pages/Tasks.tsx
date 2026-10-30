@@ -37,6 +37,7 @@ interface TaskForm {
   trigger_task_ids: string[];
   tags: string;
   missed_alert: boolean;
+  catchup: boolean;
   trigger_on: "success" | "failure" | "always";
   notify_type: "none" | "webhook" | "feishu" | "dingtalk";
   notify_url: string;
@@ -59,6 +60,7 @@ const emptyForm: TaskForm = {
   trigger_task_ids: [],
   tags: "",
   missed_alert: false,
+  catchup: false,
   trigger_on: "success",
   notify_type: "none",
   notify_url: "",
@@ -155,6 +157,7 @@ export default function Tasks() {
       trigger_task_ids: form.trigger_task_ids,
       tags: form.tags.split(",").map((s) => s.trim()).filter(Boolean),
       missed_alert: form.missed_alert,
+      catchup: form.catchup,
       trigger_on: form.trigger_on,
       notify_type: form.notify_type,
       ...(form.notify_type !== "none" ? { notify_url: form.notify_url } : {}),
@@ -199,6 +202,7 @@ export default function Tasks() {
       trigger_task_ids: t.trigger_task_ids ?? [],
       tags: (t.tags ?? []).join(", "),
       missed_alert: t.missed_alert ?? false,
+      catchup: t.catchup ?? false,
       trigger_on: (t.trigger_on as TaskForm["trigger_on"]) || "success",
       notify_type: (t.notify_type as TaskForm["notify_type"]) || "none",
       notify_url: t.notify_url ?? "",
@@ -241,6 +245,7 @@ export default function Tasks() {
       max_concurrent: src.max_concurrent,
       tags: src.tags ?? [],
       missed_alert: src.missed_alert,
+      catchup: src.catchup,
       notify_type: src.notify_type,
       ...(src.notify_type !== "none" ? { notify_url: src.notify_url } : {}),
     };
@@ -799,6 +804,15 @@ export default function Tasks() {
                     className="h-3.5 w-3.5 accent-[var(--primary)]"
                   />
                   {tr("Missed-run alert")}
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap cursor-pointer self-center" title={tr("Run the missed schedule once on startup (within 24h)")}>
+                  <input
+                    type="checkbox"
+                    checked={form.catchup}
+                    onChange={(e) => setForm({ ...form, catchup: e.target.checked })}
+                    className="h-3.5 w-3.5 accent-[var(--primary)]"
+                  />
+                  {tr("Catch-up on restart")}
                 </label>
                 {form.notify_type !== "none" && (
                   <Input
