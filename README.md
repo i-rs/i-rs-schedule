@@ -125,6 +125,8 @@ docker compose up -d --build
 | `GLOBAL_MAX_CONCURRENCY` | `32` | Global concurrent execution limit (waits when full) |
 | `BACKUP_DIR` | *(unset)* | Daily SQLite backup directory (`VACUUM INTO`); unset disables backups |
 | `BACKUP_KEEP` | `7` | Backup files to keep (oldest pruned) |
+| `CATCHUP_MAX_LAG_HOURS` | `24` | Max lookback for catch-up runs on startup (per-task `catchup` opt-in) |
+| `NOTIFY_WEBHOOK_SECRET` | *(unset)* | HMAC-SHA256 secret for generic webhook notifications (`X-i-rs-Signature` header) |
 | `RUST_LOG` | `info` | Log level (e.g. `i_rs_schedule=debug`) |
 
 ## Commands
