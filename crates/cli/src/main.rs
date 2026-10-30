@@ -55,6 +55,17 @@ enum Command {
 
     #[command(subcommand)]
     Var(VarCmd),
+
+    #[command(subcommand)]
+    Session(SessionCmd),
+}
+
+#[derive(Subcommand)]
+enum SessionCmd {
+    /// 列出登录会话
+    List,
+    /// 吊销一个会话(传列表中的 token_hash)
+    Revoke { hash: String },
 }
 
 #[derive(Subcommand)]
@@ -789,6 +800,22 @@ async fn main() -> Result<()> {
             VarCmd::Delete { key } => {
                 let resp = client
                     .delete(format!("{base}/api/vars/{key}"))
+                    .send()
+                    .await?;
+                print_response(resp).await?;
+            }
+        },
+        Command::Session(cmd) => match cmd {
+            SessionCmd::List => {
+                let resp = client
+                    .get(format!("{base}/api/auth/sessions"))
+                    .send()
+                    .await?;
+                print_response(resp).await?;
+            }
+            SessionCmd::Revoke { hash } => {
+                let resp = client
+                    .delete(format!("{base}/api/auth/sessions/{hash}"))
                     .send()
                     .await?;
                 print_response(resp).await?;

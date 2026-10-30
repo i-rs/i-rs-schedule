@@ -50,6 +50,21 @@ export interface VarInfo {
   is_secret: boolean;
 }
 
+export interface SessionInfo {
+  token_hash: string;
+  created_at: string;
+  expires_at: string;
+}
+
+/** 登录会话(哈希标识)。 */
+export async function listSessions(): Promise<SessionInfo[]> {
+  return request("/api/auth/sessions");
+}
+
+export async function revokeSession(tokenHash: string): Promise<void> {
+  await request(`/api/auth/sessions/${encodeURIComponent(tokenHash)}`, { method: "DELETE" });
+}
+
 /** 全局变量(is_secret 的 value 永不返回)。 */
 export async function listVars(): Promise<VarInfo[]> {
   return request("/api/vars");

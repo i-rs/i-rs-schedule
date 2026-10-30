@@ -1182,6 +1182,41 @@ impl Db {
         .await
     }
 
+    /// 列出登录会话(token_hash 即标识,非敏感;含已过期)。
+    pub async fn list_sessions(&self) -> anyhow::Result<Vec<(String, String, String)>> {
+        let pool = self.pool.clone();
+        spawn_db(pool, move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT token_hash, created_at, expires_at FROM sessions ORDER BY created_at DESC",
+            )?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await
+    }
+
+    /// 吊销一个登录会话,返回是否存在。
+    pub async fn revoke_session(&self, token_hash: &str) -> anyhow::Result<bool> {
+        let pool = self.pool.clone();
+        let token_hash = token_hash.to_string();
+        spawn_db(pool, move |conn| {
+            let n = conn.execute(
+                "DELETE FROM sessions WHERE token_hash = ?1",
+                params![token_hash],
+            )?;
+            Ok(n > 0)
+        })
+        .await
+    }
+
     /// (仅测试)直写/读取口令哈希,模拟旧版本数据。
     #[cfg(test)]
     pub(crate) async fn set_password_hash_raw(

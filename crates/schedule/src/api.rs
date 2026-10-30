@@ -1282,6 +1282,48 @@ pub fn build_router(
         });
     }
 
+    // 登录会话管理:列表(哈希标识)与吊销。
+    {
+        let db_sess_list = db.clone();
+        let db_sess_del = db.clone();
+        router.get("/api/auth/sessions", move |_req: Request| {
+            let db = db_sess_list.clone();
+            async move {
+                let rows = db
+                    .list_sessions()
+                    .await
+                    .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                let items: Vec<serde_json::Value> = rows
+                    .into_iter()
+                    .map(|(token_hash, created_at, expires_at)| {
+                        serde_json::json!({
+                            "token_hash": token_hash,
+                            "created_at": created_at,
+                            "expires_at": expires_at,
+                        })
+                    })
+                    .collect();
+                ok(items)
+            }
+        });
+        router.delete("/api/auth/sessions/:hash", move |req: Request| {
+            let db = db_sess_del.clone();
+            async move {
+                let hash: String = req
+                    .param("hash")
+                    .map_err(|_| err_msg(400, "missing hash"))?;
+                let removed = db
+                    .revoke_session(&hash)
+                    .await
+                    .map_err(|e| err_msg(500, format!("db error: {e}")))?;
+                if removed {
+                    let _ = db.audit("session.revoke", "session revoked").await;
+                }
+                ok(serde_json::json!({ "removed": removed }))
+            }
+        });
+    }
+
     // 审计日志查询。
     // (limit 通过 query string 传入)
     {
