@@ -16,6 +16,7 @@ pub struct FileConfig {
     pub global_max_concurrent: Option<usize>,
     pub backup_dir: Option<String>,
     pub backup_keep: Option<usize>,
+    pub catchup_max_lag_hours: Option<i64>,
 }
 
 impl FileConfig {
@@ -54,6 +55,8 @@ pub struct Config {
     pub backup_dir: Option<String>,
     /// 备份保留份数
     pub backup_keep: usize,
+    /// 重启补跑的最长回溯时间(小时)
+    pub catchup_max_lag_hours: i64,
 }
 
 impl Config {
@@ -94,6 +97,10 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .or(file.backup_keep)
             .unwrap_or(7);
+        let catchup_max_lag_hours = env("CATCHUP_MAX_LAG_HOURS")
+            .and_then(|v| v.parse().ok())
+            .or(file.catchup_max_lag_hours)
+            .unwrap_or(24);
 
         Self {
             db_path,
@@ -108,6 +115,7 @@ impl Config {
             global_max_concurrent,
             backup_dir,
             backup_keep,
+            catchup_max_lag_hours,
         }
     }
 

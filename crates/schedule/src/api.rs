@@ -69,6 +69,7 @@ struct CreateTaskRequest {
     trigger_task_ids: Option<Vec<String>>,
     tags: Option<Vec<String>>,
     missed_alert: Option<bool>,
+    catchup: Option<bool>,
     trigger_on: Option<String>,
     notify_type: Option<String>,
     notify_url: Option<String>,
@@ -175,6 +176,7 @@ fn build_task_with_hint(body: CreateTaskRequest, id_hint: String) -> Result<Task
     task.trigger_task_ids = trigger_task_ids;
     task.tags = tags;
     task.missed_alert = body.missed_alert.unwrap_or(false);
+    task.catchup = body.catchup.unwrap_or(false);
     task.trigger_on = trigger_on;
     Ok(task)
 }

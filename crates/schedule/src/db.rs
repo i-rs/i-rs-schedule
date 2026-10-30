@@ -49,6 +49,9 @@ pub struct Task {
     /// 漏跑告警:到期后宽限期内无任何执行尝试则推送(cron 任务有效)
     #[serde(default)]
     pub missed_alert: bool,
+    /// 重启补跑:启动时发现错过的触发点(24h 内)补跑一次
+    #[serde(default)]
+    pub catchup: bool,
     pub trigger_on: String,
     #[serde(rename = "notify_type")]
     pub notify_type: String,
@@ -101,6 +104,7 @@ impl Task {
             tags: Vec::new(),
             hook_secret_hash: None,
             missed_alert: false,
+            catchup: false,
             trigger_on: "success".into(),
             notify_type: "none".to_string(),
             notify_url: String::new(),
@@ -174,6 +178,7 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     let tags: Vec<String> = serde_json::from_str(&tags_raw).unwrap_or_default();
     let hook_secret_hash: Option<String> = row.get("hook_secret_hash")?;
     let missed_alert: bool = row.get::<_, i64>("missed_alert")? != 0;
+    let catchup: bool = row.get::<_, i64>("catchup")? != 0;
     let trigger_on: String = row.get("trigger_on")?;
     let notify_type: String = row.get("notify_type")?;
     let notify_url: String = row.get("notify_url")?;
@@ -213,6 +218,7 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         tags,
         hook_secret_hash,
         missed_alert,
+        catchup,
         trigger_on,
         notify_type,
         notify_url,
@@ -277,6 +283,7 @@ impl Db {
                 tags         TEXT NOT NULL DEFAULT '[]', -- 标签(JSON 数组)
                 hook_secret_hash TEXT, -- Webhook 触发 secret 的 sha256(NULL = 未开启)
                 missed_alert INTEGER NOT NULL DEFAULT 0, -- 漏跑告警
+                catchup      INTEGER NOT NULL DEFAULT 0, -- 重启补跑
                 trigger_on   TEXT NOT NULL DEFAULT 'success',
                 notify_type TEXT NOT NULL DEFAULT 'none',
                 notify_url  TEXT NOT NULL DEFAULT '',
@@ -402,6 +409,13 @@ impl Db {
             )?;
             tracing::info!("migrated tasks table: added missed_alert");
         }
+        if !existing.iter().any(|c| c == "catchup") {
+            conn.execute(
+                "ALTER TABLE tasks ADD COLUMN catchup INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+            tracing::info!("migrated tasks table: added catchup");
+        }
         if !existing.iter().any(|c| c == "trigger_on") {
             conn.execute(
                 "ALTER TABLE tasks ADD COLUMN trigger_on TEXT NOT NULL DEFAULT 'success'",
@@ -505,8 +519,8 @@ impl Db {
                 "INSERT INTO tasks (id, name, task_type, enabled, schedule_type, cron_expr, delay_secs,
                  http_method, http_url, http_headers, http_body, shell_cmd, timezone, timeout_secs,
                  max_retries, max_concurrent, trigger_task_ids, tags, hook_secret_hash,
-                 missed_alert, trigger_on, notify_type, notify_url, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+                 missed_alert, catchup, trigger_on, notify_type, notify_url, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
                 params![
                     task.id,
                     task.name,
@@ -528,6 +542,7 @@ impl Db {
                     serde_json::to_string(&task.tags).unwrap(),
                     task.hook_secret_hash,
                     task.missed_alert as i64,
+                    task.catchup as i64,
                     task.trigger_on,
                     task.notify_type,
                     task.notify_url,
@@ -612,7 +627,8 @@ impl Db {
                  delay_secs=?6, http_method=?7, http_url=?8, http_headers=?9, http_body=?10,
                  shell_cmd=?11, timezone=?12, timeout_secs=?13, max_retries=?14, max_concurrent=?15,
                  trigger_task_ids=?16, tags=?17, hook_secret_hash=?18, missed_alert=?19,
-                 trigger_on=?20, notify_type=?21, notify_url=?22, updated_at=?23 WHERE id=?24",
+                 catchup=?20, trigger_on=?21, notify_type=?22, notify_url=?23, updated_at=?24
+                 WHERE id=?25",
                 params![
                     task.name,
                     task_type_str,
@@ -633,6 +649,7 @@ impl Db {
                     serde_json::to_string(&task.tags).unwrap(),
                     task.hook_secret_hash,
                     task.missed_alert as i64,
+                    task.catchup as i64,
                     task.trigger_on,
                     task.notify_type,
                     task.notify_url,

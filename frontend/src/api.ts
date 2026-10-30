@@ -11,6 +11,7 @@ export interface Task {
   trigger_task_ids: string[];
   tags: string[];
   missed_alert: boolean;
+  catchup: boolean;
   trigger_on: string;
   next_run_at: string | null;
   notify_type: string;
@@ -138,6 +139,7 @@ export interface CreateTaskPayload {
   trigger_task_ids?: string[];
   tags?: string[];
   missed_alert?: boolean;
+  catchup?: boolean;
   trigger_on?: string;
   notify_type?: string;
   notify_url?: string;

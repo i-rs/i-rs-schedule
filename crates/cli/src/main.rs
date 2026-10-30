@@ -143,6 +143,10 @@ struct AddArgs {
     #[arg(long, default_value_t = false)]
     missed_alert: bool,
 
+    /// 重启补跑:启动时补跑错过的调度(24h 内一次)
+    #[arg(long, default_value_t = false)]
+    catchup: bool,
+
     #[arg(long, default_value = "")]
     trigger_on_success: Vec<String>,
 
@@ -217,6 +221,9 @@ struct UpdateArgs {
 
     #[arg(long)]
     missed_alert: Option<bool>,
+
+    #[arg(long)]
+    catchup: Option<bool>,
 
     #[arg(long, value_delimiter = ',')]
     trigger_on_success: Vec<String>,
@@ -330,6 +337,8 @@ struct CreateTaskBody {
     tags: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     missed_alert: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    catchup: Option<bool>,
     trigger_on: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     notify_type: Option<String>,
@@ -431,6 +440,7 @@ async fn main() -> Result<()> {
                         Some(args.tags)
                     },
                     missed_alert: Some(args.missed_alert),
+                    catchup: Some(args.catchup),
                     trigger_on: Some(args.trigger_on),
                     enabled: args.enabled,
                     notify_type: Some(args.notify_type),
@@ -470,6 +480,7 @@ async fn main() -> Result<()> {
                     "trigger_task_ids": cur["trigger_task_ids"],
                     "tags": cur["tags"],
                     "missed_alert": cur["missed_alert"],
+                    "catchup": cur["catchup"],
                     "enabled": cur["enabled"],
                     "notify_type": cur["notify_type"],
                     "notify_url": cur["notify_url"],
@@ -546,6 +557,9 @@ async fn main() -> Result<()> {
                 }
                 if let Some(v) = args.missed_alert {
                     payload["missed_alert"] = serde_json::Value::from(v);
+                }
+                if let Some(v) = args.catchup {
+                    payload["catchup"] = serde_json::Value::from(v);
                 }
                 if !args.trigger_on_success.is_empty() {
                     payload["trigger_task_ids"] = serde_json::json!(args.trigger_on_success);

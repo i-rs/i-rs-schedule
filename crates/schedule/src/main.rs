@@ -101,6 +101,52 @@ async fn main() -> anyhow::Result<()> {
         watchdog::run(wd_db, wd_exec).await;
     });
 
+    // 重启补跑:catchup 任务错过的触发点(宽限 5 分钟、最长回溯 24h)补跑一次。
+    // 维护模式恢复为开启时不补跑——维护语义优先。
+    if !maintenance_enabled {
+        let cu_db = db.clone();
+        let cu_exec = executor.as_ref().clone();
+        let max_lag_h = config.catchup_max_lag_hours;
+        tokio::spawn(async move {
+            let tasks = match cu_db.list_enabled_tasks().await {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::warn!(error = %e, "catchup list tasks failed");
+                    return;
+                }
+            };
+            for task in tasks {
+                if !task.catchup {
+                    continue;
+                }
+                let Some(expected_iso) = watchdog::missed_expected(&cu_db, &task).await else {
+                    continue;
+                };
+                // 过旧的缺口不补
+                if let Ok(expected) = chrono::DateTime::parse_from_rfc3339(&expected_iso) {
+                    let lag = chrono::Utc::now() - expected.with_timezone(&chrono::Utc);
+                    if lag > chrono::Duration::hours(max_lag_h) {
+                        tracing::info!(task_id = %task.id, lag_hours = lag.num_hours(), "catchup skipped: gap too old");
+                        continue;
+                    }
+                }
+                tracing::info!(task_id = %task.id, expected = %expected_iso, "catchup run");
+                let _ = cu_db
+                    .audit(
+                        "task.catchup",
+                        &format!("catchup run for missed schedule {expected_iso}"),
+                    )
+                    .await;
+                let db2 = cu_db.clone();
+                let exec2 = cu_exec.clone();
+                let task2 = task.clone();
+                tokio::spawn(async move {
+                    let _ = exec2.execute_and_record(&db2, &task2).await;
+                });
+            }
+        });
+    }
+
     // scheduler 在后台跑,处理到期任务与控制命令。
     let scheduler_handle = tokio::spawn(async move {
         scheduler.run(cmd_rx, executor, scheduler_db).await;

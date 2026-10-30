@@ -136,6 +136,7 @@ mod tests {
             tags: Vec::new(),
             hook_secret_hash: None,
             missed_alert: false,
+            catchup: false,
             trigger_on: "success".into(),
             notify_type: "none".into(),
             notify_url: String::new(),
