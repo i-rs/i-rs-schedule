@@ -188,6 +188,44 @@ pub struct AuthSettings {
     pub has_admin: bool,
 }
 
+/// 登录失败滑动窗口:同一用户名 15 分钟内 10 次失败 → 拒绝(内存态,重启清零)。
+struct LoginGuard {
+    failures: std::sync::Mutex<HashMap<String, Vec<std::time::Instant>>>,
+}
+
+impl LoginGuard {
+    const WINDOW: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+    const MAX_FAILURES: usize = 10;
+
+    fn new() -> Self {
+        Self {
+            failures: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn blocked(&self, username: &str) -> bool {
+        let mut map = self.failures.lock().unwrap();
+        let now = std::time::Instant::now();
+        let list = map.entry(username.to_lowercase()).or_default();
+        list.retain(|t| now.duration_since(*t) < Self::WINDOW);
+        list.len() >= Self::MAX_FAILURES
+    }
+
+    fn record_failure(&self, username: &str) {
+        let mut map = self.failures.lock().unwrap();
+        map.entry(username.to_lowercase())
+            .or_default()
+            .push(std::time::Instant::now());
+    }
+
+    fn clear(&self, username: &str) {
+        self.failures
+            .lock()
+            .unwrap()
+            .remove(&username.to_lowercase());
+    }
+}
+
 /// Bearer 认证中间件:静态 token / 会话 / API token 任一匹配即放行;
 /// /healthz 与 /metrics 豁免(探活与抓取不应依赖凭据)。
 struct Auth {
@@ -1148,8 +1186,10 @@ pub fn build_router(
     // 登录:校验管理员账密,签发 30 天会话 token。
     if auth.has_admin {
         let db_login = db.clone();
+        let guard = Arc::new(LoginGuard::new());
         router.post("/api/auth/login", move |mut req: Request| {
             let db = db_login.clone();
+            let guard = guard.clone();
             async move {
                 #[derive(Deserialize)]
                 struct LoginBody {
@@ -1160,13 +1200,18 @@ pub fn build_router(
                     .body()
                     .await
                     .map_err(|e| err_msg(400, format!("invalid body: {e}")))?;
+                if guard.blocked(&body.username) {
+                    return Err(err_msg(429, "too many login attempts; try again later"));
+                }
                 if !db
                     .verify_admin(&body.username, &body.password)
                     .await
                     .unwrap_or(false)
                 {
+                    guard.record_failure(&body.username);
                     return Err(err_msg(401, "invalid credentials"));
                 }
+                guard.clear(&body.username);
                 let (token, expires_at) = db
                     .create_session(30)
                     .await
@@ -1270,4 +1315,26 @@ pub fn build_router(
     }
 
     router
+}
+
+#[cfg(test)]
+mod login_guard_tests {
+    use super::*;
+
+    #[test]
+    fn blocks_after_max_failures_and_clears() {
+        let g = LoginGuard::new();
+        for _ in 0..LoginGuard::MAX_FAILURES {
+            assert!(!g.blocked("alice"));
+            g.record_failure("alice");
+        }
+        assert!(g.blocked("alice"));
+        // 用户名大小写归一
+        assert!(g.blocked("ALICE"));
+        // 其他用户不受影响
+        assert!(!g.blocked("bob"));
+        // 成功登录清零
+        g.clear("alice");
+        assert!(!g.blocked("alice"));
+    }
 }
