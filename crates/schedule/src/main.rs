@@ -90,6 +90,7 @@ async fn main() -> anyhow::Result<()> {
         config.max_output_kb,
         live::Events::new(),
         config.global_max_concurrent,
+        config.notify_webhook_secret.clone(),
     ));
     let scheduler_db = db.clone();
     let api_executor = executor.clone();

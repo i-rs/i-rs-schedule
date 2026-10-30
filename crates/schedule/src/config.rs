@@ -17,6 +17,7 @@ pub struct FileConfig {
     pub backup_dir: Option<String>,
     pub backup_keep: Option<usize>,
     pub catchup_max_lag_hours: Option<i64>,
+    pub notify_webhook_secret: Option<String>,
 }
 
 impl FileConfig {
@@ -57,6 +58,8 @@ pub struct Config {
     pub backup_keep: usize,
     /// 重启补跑的最长回溯时间(小时)
     pub catchup_max_lag_hours: i64,
+    /// 通用 webhook 通知的 HMAC 签名密钥(空 = 不签名)
+    pub notify_webhook_secret: Option<String>,
 }
 
 impl Config {
@@ -101,6 +104,7 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .or(file.catchup_max_lag_hours)
             .unwrap_or(24);
+        let notify_webhook_secret = env("NOTIFY_WEBHOOK_SECRET").or(file.notify_webhook_secret);
 
         Self {
             db_path,
@@ -116,6 +120,7 @@ impl Config {
             backup_dir,
             backup_keep,
             catchup_max_lag_hours,
+            notify_webhook_secret,
         }
     }
 

@@ -24,6 +24,7 @@ r2d2_sqlite = "0.35"
 async-trait = "0.1"
 toml = "0.8"
 sha2 = "0.10"
+hmac = "0.12"
 argon2 = { version = "0.5", features = ["rand"] }
 rand = "0.9"
 chrono-tz = "0.10"

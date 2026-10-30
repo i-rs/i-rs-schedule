@@ -111,6 +111,7 @@ impl Executor {
         max_output_kb: usize,
         events: crate::live::Events,
         global_max_concurrent: usize,
+        webhook_secret: Option<String>,
     ) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
@@ -118,7 +119,7 @@ impl Executor {
             .expect("failed to build reqwest client");
         Self {
             client,
-            notifier: Notifier::new(),
+            notifier: Notifier::new(webhook_secret),
             global_notify,
             max_output_kb,
             live: crate::live::LiveRegistry::default(),
@@ -719,7 +720,7 @@ mod concurrency_tests {
     #[tokio::test]
     async fn overlapping_runs_skip_when_limit_reached() {
         let (db, dir) = temp_db();
-        let ex = Executor::with_global_concurrency(None, 64, crate::live::Events::new(), 32);
+        let ex = Executor::with_global_concurrency(None, 64, crate::live::Events::new(), 32, None);
         let task = sleep_task(1);
         // 先入库:task_executions 对 tasks 有外键约束
         db.create_task(&task).await.unwrap();
@@ -742,7 +743,7 @@ mod concurrency_tests {
     #[tokio::test]
     async fn zero_max_concurrent_allows_parallel() {
         let (db, dir) = temp_db();
-        let ex = Executor::with_global_concurrency(None, 64, crate::live::Events::new(), 32);
+        let ex = Executor::with_global_concurrency(None, 64, crate::live::Events::new(), 32, None);
         let task = sleep_task(0);
         db.create_task(&task).await.unwrap();
         let task2 = task.clone();
