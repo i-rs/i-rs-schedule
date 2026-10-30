@@ -555,6 +555,7 @@ pub fn build_router(
     });
 
     let ex_live = executor.clone();
+    let metrics_render = executor.metrics().clone();
     let ex_events = executor.clone();
     let ev_import = executor.events().clone();
     let ev_maint = executor.events().clone();
@@ -564,6 +565,7 @@ pub fn build_router(
     let ex_hook = executor.clone();
     let maintenance_get = maintenance.clone();
     let maintenance_post = maintenance.clone();
+    let maintenance_metrics = maintenance.clone();
     let db_run = db.clone();
     let executor_ntest = executor.clone();
     router.post("/api/tasks/:id/run", move |req: Request| {
@@ -964,6 +966,8 @@ pub fn build_router(
         let db_metrics = db.clone();
         router.get("/metrics", move |_req: Request| {
             let db = db_metrics.clone();
+            let metrics = metrics_render.clone();
+            let maintenance = maintenance_metrics.clone();
             async move {
                 let (total, success, failure, enabled) = db.stats().await.unwrap_or((0, 0, 0, 0));
                 let body = format!(
@@ -978,7 +982,17 @@ pub fn build_router(
                      irs_executions_failure_total {failure}\n\
                      # HELP irs_tasks_enabled Currently enabled tasks.\n\
                      # TYPE irs_tasks_enabled gauge\n\
-                     irs_tasks_enabled {enabled}\n"
+                     irs_tasks_enabled {enabled}\n\
+                     {}\
+                     # HELP irs_executions_skipped_total Skipped executions (overlap, maintenance, db errors).\n\
+                     # TYPE irs_executions_skipped_total counter\n\
+                     irs_executions_skipped_total {}\n\
+                     # HELP irs_maintenance_active Whether maintenance mode is on.\n\
+                     # TYPE irs_maintenance_active gauge\n\
+                     irs_maintenance_active {}\n",
+                    metrics.render_histogram(),
+                    metrics.skipped(),
+                    if maintenance.enabled() { 1 } else { 0 },
                 );
                 // body 为纯文本 String,with_status 实际不会失败(与 err_msg 的 unwrap 同理)。
                 let resp: Response = Response::with_status(200, body).unwrap();

@@ -4,6 +4,7 @@ mod config;
 mod db;
 mod executor;
 mod live;
+mod metrics;
 mod notify;
 mod output;
 mod schedule;

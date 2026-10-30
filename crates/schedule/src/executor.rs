@@ -98,6 +98,8 @@ pub struct Executor {
     in_flight: std::sync::Arc<std::sync::Mutex<HashMap<String, usize>>>,
     /// 全局并发兜底:所有执行共享的信号量(超限等待)
     global_permits: std::sync::Arc<tokio::sync::Semaphore>,
+    /// 进程内指标(直方图 / skipped)
+    metrics: std::sync::Arc<crate::metrics::Metrics>,
 }
 
 impl Executor {
@@ -126,7 +128,13 @@ impl Executor {
             events,
             in_flight: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
             global_permits: std::sync::Arc::new(tokio::sync::Semaphore::new(global_max_concurrent)),
+            metrics: std::sync::Arc::new(crate::metrics::Metrics::default()),
         }
+    }
+
+    /// 指标访问(/metrics 渲染用)。
+    pub fn metrics(&self) -> &std::sync::Arc<crate::metrics::Metrics> {
+        &self.metrics
     }
 
     /// 实时输出注册表访问(live 端点用)。
@@ -282,6 +290,7 @@ impl Executor {
             started_at: crate::db::now_iso(),
             finished_at: Some(crate::db::now_iso()),
         };
+        self.metrics.bump_skipped();
         if let Err(e) = db.create_execution(&exec).await {
             tracing::warn!(error = %e, task_id = %task.id, "record skipped execution failed");
         } else {
@@ -474,6 +483,7 @@ impl Executor {
         self.live.remove(&exec_id);
 
         let duration_ms = start.elapsed().as_millis() as u64;
+        self.metrics.record(duration_ms);
 
         tracing::info!(
             task_id = %task.id,
