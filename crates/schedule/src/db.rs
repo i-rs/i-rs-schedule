@@ -893,10 +893,41 @@ impl Db {
         format!("{:x}", hasher.finalize())
     }
 
+    /// 口令哈希:argon2id(PHC 字符串,自带盐)。
+    pub fn hash_password(password: &str) -> String {
+        use argon2::password_hash::SaltString;
+        use argon2::{Argon2, PasswordHasher};
+        // 用既有 rand 依赖生成盐字节,避免 password_hash 的 getrandom 特性
+        use rand::RngCore;
+        let mut bytes = [0u8; 16];
+        rand::rng().fill_bytes(&mut bytes);
+        let salt = SaltString::encode_b64(&bytes).expect("salt encode failed");
+        Argon2::default()
+            .hash_password(password.as_bytes(), &salt)
+            .expect("argon2 hash failed")
+            .to_string()
+    }
+
+    /// 口令校验:argon2id 直接验证;旧版裸 sha256 兼容比对。
+    fn verify_password(password: &str, stored: &str) -> bool {
+        if stored.starts_with("$argon2") {
+            use argon2::{Argon2, PasswordHash, PasswordVerifier};
+            PasswordHash::new(stored)
+                .map(|ph| {
+                    Argon2::default()
+                        .verify_password(password.as_bytes(), &ph)
+                        .is_ok()
+                })
+                .unwrap_or(false)
+        } else {
+            Self::sha256_hex(password) == stored
+        }
+    }
+
     pub async fn seed_admin(&self, username: &str, password: &str) -> anyhow::Result<()> {
         let pool = self.pool.clone();
         let username = username.to_string();
-        let hash = Self::sha256_hex(password);
+        let hash = Self::hash_password(password);
         spawn_db(pool, move |conn| {
             conn.execute(
                 "INSERT INTO users (username, password_hash) VALUES (?1, ?2)
@@ -911,7 +942,7 @@ impl Db {
     pub async fn verify_admin(&self, username: &str, password: &str) -> anyhow::Result<bool> {
         let pool = self.pool.clone();
         let username = username.to_string();
-        let hash = Self::sha256_hex(password);
+        let password = password.to_string();
         spawn_db(pool, move |conn| {
             let stored: Option<String> = conn
                 .query_row(
@@ -920,7 +951,20 @@ impl Db {
                     |r| r.get(0),
                 )
                 .ok();
-            Ok(stored == Some(hash))
+            let Some(stored) = stored else {
+                return Ok(false);
+            };
+            if !Self::verify_password(password.as_str(), stored.as_str()) {
+                return Ok(false);
+            }
+            // 惰性升级:旧版裸 sha256 → argon2id
+            if !stored.starts_with("$argon2") {
+                conn.execute(
+                    "UPDATE users SET password_hash = ?1 WHERE username = ?2",
+                    params![Self::hash_password(password.as_str()), username],
+                )?;
+            }
+            Ok(true)
         })
         .await
     }
@@ -1138,6 +1182,45 @@ impl Db {
         .await
     }
 
+    /// (仅测试)直写/读取口令哈希,模拟旧版本数据。
+    #[cfg(test)]
+    pub(crate) async fn set_password_hash_raw(
+        &self,
+        username: &str,
+        hash: &str,
+    ) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let (u, h) = (username.to_string(), hash.to_string());
+        spawn_db(pool, move |conn| {
+            conn.execute(
+                "UPDATE users SET password_hash = ?1 WHERE username = ?2",
+                params![h, u],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn get_password_hash_raw(
+        &self,
+        username: &str,
+    ) -> anyhow::Result<Option<String>> {
+        let pool = self.pool.clone();
+        let u = username.to_string();
+        spawn_db(pool, move |conn| {
+            let v = conn
+                .query_row(
+                    "SELECT password_hash FROM users WHERE username = ?1",
+                    params![u],
+                    |r| r.get(0),
+                )
+                .ok();
+            Ok(v)
+        })
+        .await
+    }
+
     /// 设置/清除任务的 Webhook secret 哈希,返回任务是否存在。
     pub async fn set_hook_secret(&self, id: &str, hash: Option<String>) -> anyhow::Result<bool> {
         let pool = self.pool.clone();
@@ -1178,5 +1261,52 @@ impl Db {
             Ok(affected as u64)
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::*;
+
+    fn temp_db() -> (Db, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("irs-auth-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::new(dir.join("t.db").to_str().unwrap()).unwrap();
+        (db, dir)
+    }
+
+    #[test]
+    fn argon2_roundtrip_and_reject() {
+        let hash = Db::hash_password("s3cret");
+        assert!(hash.starts_with("$argon2"), "PHC format: {hash}");
+        assert!(Db::verify_password("s3cret", &hash));
+        assert!(!Db::verify_password("wrong", &hash));
+        // 两个同口令的哈希不同(随机盐)
+        assert_ne!(Db::hash_password("s3cret"), hash);
+    }
+
+    #[test]
+    fn legacy_sha256_still_verified() {
+        let legacy = Db::sha256_hex("oldpw");
+        assert!(Db::verify_password("oldpw", &legacy));
+        assert!(!Db::verify_password("nope", &legacy));
+    }
+
+    #[tokio::test]
+    async fn verify_admin_lazy_upgrades_legacy_hash() {
+        let (db, dir) = temp_db();
+        db.seed_admin("admin", "pw").await.unwrap();
+
+        // 模拟旧版本种子:写回裸 sha256
+        db.set_password_hash_raw("admin", &Db::sha256_hex("pw"))
+            .await
+            .unwrap();
+        assert!(db.verify_admin("admin", "pw").await.unwrap());
+        // 已被惰性升级为 argon2
+        let upgraded = db.get_password_hash_raw("admin").await.unwrap().unwrap();
+        assert!(upgraded.starts_with("$argon2"));
+        // 错误密码仍拒绝
+        assert!(!db.verify_admin("admin", "bad").await.unwrap());
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
